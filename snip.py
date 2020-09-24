@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import types
-import utils
 
 # Defining masked layer forward methods for normal layers
 def mask_Conv2d(self, x):
@@ -51,66 +50,6 @@ def apply_snip(args, nets, snip_loader, criterion, device):
         net_prune_snip(net, args.sparse_lvl)
 
     print('[*] SNIP pruning done!')
-
-
-# Calculate gradient for SNIP pruning
-def find_loss(args, nets, loader, g_loss_func, d_loss_func, device):
-    # Calculate loss and find connect sensitivity
-    netG, netD = nets
-
-    # Use first args.prunesets_num images for SNIP
-    for _ in range(args.prunesets_num):
-
-        utils.net_require_grad([netD], False)
-        utils.net_require_grad([netG], True)
-
-        # Get one sample from data loader
-        try:
-            x = next(iter(loader))[0].cuda().float()
-        except StopIteration:
-            data_iter = iter(loader)
-            x = next(data_iter)[0].cuda().float()
-        # x = next(loader)[0].cuda().float()
-
-        # Generate noise 
-        z = torch.randn(args.batch_size, args.input_dim, device=device) 
-
-        # Forward pass of normal GAN
-        x_hat = netG(z)
-        y_hat = netD(x_hat)
-        y = netD(x)
-
-        if args.losstype == 'HH':
-            g_loss = g_loss_func('hinge', y_hat, y, sortz=args.sortz)
-        else:
-            g_loss = g_loss_func('log', y_hat, y, sortz=args.sortz)
-
-        g_loss.backward()
-
-        utils.net_require_grad([netG], False)
-        utils.net_require_grad([netD], True)
-
-        # Do the same thing for netD
-        try:
-            x = next(iter(loader))[0].cuda().float()
-        except StopIteration:
-            data_iter = iter(loader)
-            x = next(data_iter)[0].cuda().float()
-        # x = next(loader)[0].cuda().float()
-
-        z = torch.randn(args.batch_size, args.input_dim, device=device)
-
-        x_hat = netG(z).detach()
-        y_hat = netD(x_hat)
-        y = netD(x)
-        if args.losstype == 'log':
-            d_loss = d_loss_func('log', y_hat, y, sortz=args.sortz)
-        else:
-            d_loss = d_loss_func('hinge', y_hat, y, sortz=args.sortz)
-        d_loss.backward()
-
-    # Set networks back to active after calculating the gradients
-    utils.net_require_grad([netD, netG], True)
 
 # Prune network based on gradient absolute values
 def net_prune_snip(net, sparse_lvl):
