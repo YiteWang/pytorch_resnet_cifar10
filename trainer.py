@@ -93,14 +93,15 @@ def main():
 
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
-
-    train_loader = torch.utils.data.DataLoader(
-        datasets.CIFAR10(root='./data', train=True, transform=transforms.Compose([
+    train_dataset = datasets.CIFAR10(root='./data', train=True, transform=transforms.Compose([
             transforms.RandomHorizontalFlip(),
             transforms.RandomCrop(32, 4),
             transforms.ToTensor(),
             normalize,
-        ]), download=True),
+        ]), download=True)
+
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
         batch_size=args.batch_size, shuffle=True,
         num_workers=args.workers, pin_memory=True)
 
@@ -118,17 +119,12 @@ def main():
     if args.prune_method != 'NONE':
         nets = [model]
         snip_loader = torch.utils.data.DataLoader(
-            datasets.CIFAR10(root='./data', train=True, transform=transforms.Compose([
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomCrop(32, 4),
-            transforms.ToTensor(),
-            normalize,
-        ]), download=True),
-        batch_size=30, shuffle=True,
-        num_workers=args.workers, pin_memory=True, sampler=BalancedBatchSampler(train_dataset))
+        train_dataset,
+        batch_size=30, shuffle=False,
+        num_workers=args.workers, pin_memory=True, sampler=sampler.BalancedBatchSampler(train_dataset))
 
         if args.prune_method == 'SNIP':
-            snip.apply_snip(args, nets, snip_loader, criterion, device, only_G = True)
+            snip.apply_snip(args, nets, snip_loader, criterion)
             
     if args.half:
         model.half()

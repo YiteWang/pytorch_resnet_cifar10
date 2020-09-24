@@ -48,6 +48,8 @@ class BalancedBatchSampler(torch.utils.data.sampler.Sampler):
                 return dataset.train_labels[idx].item()
             elif is_torchvision_installed and dataset_type is torchvision.datasets.ImageFolder:
                 return dataset.imgs[idx][1]
+            elif is_torchvision_installed and dataset_type is torchvision.datasets.CIFAR10:
+                return idx
             else:
                 raise Exception("You should pass the tensor of labels to the constructor as second argument")
 
