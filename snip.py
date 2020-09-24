@@ -23,23 +23,32 @@ def mask_ConvTranspose2d(self, x, output_size = None):
             output_padding, self.groups, self.dilation)
 
 # Apply SNIP pruning methods
-def apply_snip(args, nets, loader, g_loss_func, d_loss_func, device, only_G=False):
+def apply_snip(args, nets, snip_loader, criterion, device):
     
     # first add masks to each layer of nets
     for net in nets:
+        net.train()
         net.zero_grad()
         for layer in net.modules():
             add_mask_ones(layer)
 
     # Let the neural network run one forward pass to get connect sensitivity (CS)
-    find_loss(args, nets, loader, g_loss_func, d_loss_func, device)
+    for i in range(int(args.prunesets_num/30)+1):
+        (input, target) = snip_loader[i]
+        target = target.cuda()
+        input_var = input.cuda()
+        target_var = target
+        if args.half:
+            input_var = input_var.half()
+        # compute output
+        output = model(input_var)
+        loss = criterion(output, target_var)
+        loss.backward()
+
     
     # prune the network using CS
-    if only_G:
-        net_prune_snip(nets[0], args.sparse_lvl)
-    else:
-        for net in nets:
-            net_prune_snip(net, args.sparse_lvl)
+    for net in nets:
+        net_prune_snip(net, args.sparse_lvl)
 
     print('[*] SNIP pruning done!')
 

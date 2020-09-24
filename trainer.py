@@ -55,6 +55,9 @@ parser.add_argument('--save-dir', dest='save_dir',
 parser.add_argument('--save-every', dest='save_every',
                     help='Saves checkpoints at every specified number of epochs',
                     type=int, default=10)
+parser.add_argument('--prune_method', type=str, default='NONE', choices=['NONE', 'GRASP', 'RAND', 'SNIP', 'Delta'], help='Pruning methods.')
+parser.add_argument('--prunesets_num', type=int, default=10, help='Number of datapoints for applying pruning methods.')
+parser.add_argument('--sparse_lvl', type=float, default=0.1, help='Sparsity level of neural networks.')
 best_prec1 = 0
 
 
@@ -69,6 +72,7 @@ def main():
 
     model = torch.nn.DataParallel(resnet.__dict__[args.arch]())
     model.cuda()
+
 
     # optionally resume from a checkpoint
     if args.resume:
@@ -109,6 +113,21 @@ def main():
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
 
+    if args.prune_method != 'NONE':
+        nets = [model]
+        snip_loader = torch.utils.data.DataLoader(
+            datasets.CIFAR10(root='./data', train=True, transform=transforms.Compose([
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomCrop(32, 4),
+            transforms.ToTensor(),
+            normalize,
+        ]), download=True),
+        batch_size=30, shuffle=True,
+        num_workers=args.workers, pin_memory=True, sampler=BalancedBatchSampler(train_dataset))
+
+        if args.prune_method == 'SNIP':
+            snip.apply_snip(args, nets, snip_loader, criterion, device, only_G = True)
+            
     if args.half:
         model.half()
         criterion.half()
