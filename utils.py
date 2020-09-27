@@ -46,7 +46,7 @@ class Hook():
 
 
 def get_hook(net, layer_types):
-    hook_forward = {layer:Hook(layer) for layer in a.modules() if isinstance(layer,layer_types)}
+    hook_forward = {layer:Hook(layer) for layer in net.modules() if isinstance(layer,layer_types)}
     return hook_forward
 
 def detach_hook(handle_lists):

@@ -14,6 +14,8 @@ import torchvision.datasets as datasets
 import resnet
 import sampler
 import snip
+import utils
+import numpy as np
 
 model_names = sorted(name for name in resnet.__dict__
     if name.islower() and not name.startswith("__")
@@ -119,9 +121,10 @@ def main():
     criterion = nn.CrossEntropyLoss().cuda()
 
     if args.compute_sv:
+        print('[*] Will compute singular values throught training.')
         size_hook = utils.get_hook(model, (nn.Linear, nn.Conv2d, nn.ConvTranspose2d))
         utils.run_once(train_loader, model)
-        utils.detach_hook(size_hook)
+        utils.detach_hook([size_hook])
         training_sv = []
         training_sv.append(utils.get_sv(model, size_hook))
 
@@ -135,7 +138,8 @@ def main():
         if args.prune_method == 'SNIP':
             snip.apply_snip(args, nets, snip_loader, criterion)
 
-        training_sv.append(utils.get_sv(model, size_hook))
+        if args.compute_sv:
+            training_sv.append(utils.get_sv(model, size_hook))
             
     if args.half:
         model.half()
