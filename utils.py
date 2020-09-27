@@ -25,7 +25,7 @@ def get_sv(net, size_hook):
             # Notice that size_hook returns the input size of the layer, which is (Batch, in_channel, H, W)
             # We only want (H, W)
             sv_result = np.zeros(20,)
-            sv = SVD_Conv_Tensor_NP(layer.weight.detach().permute(2,3,1,0), size_hook[layer].input_shape[2:])
+            sv = SVD_Conv_Tensor_NP(layer.weight.detach().cpu().permute(2,3,1,0), size_hook[layer].input_shape[2:])
             sorted_sv = np.flip(np.sort(sv.flatten()),0)
             top10_sv = sorted_sv[:10]
             bot10_sv = sorted_sv[-10:]
@@ -64,3 +64,8 @@ def SVD_Conv_Tensor_NP(filter, inp_size):
   # matrix obtained by selecting that coefficient for
   # input-channel/output-channel pairs
   return la.svd(transform_coeff, compute_uv=False)
+
+def run_once(loader, model):
+    with torch.no_grad():
+        data_iter = iter(loader)
+        output = model(data_iter.next()[0].cuda())

@@ -57,6 +57,8 @@ parser.add_argument('--save-dir', dest='save_dir',
 parser.add_argument('--save-every', dest='save_every',
                     help='Saves checkpoints at every specified number of epochs',
                     type=int, default=10)
+parser.add_argument('--sv', dest='compute_sv', action='store_true',
+                    help='compute_sv throughout training')
 parser.add_argument('--prune_method', type=str, default='NONE', choices=['NONE', 'GRASP', 'RAND', 'SNIP', 'Delta'], help='Pruning methods.')
 parser.add_argument('--prunesets_num', type=int, default=10, help='Number of datapoints for applying pruning methods.')
 parser.add_argument('--sparse_lvl', type=float, default=0.1, help='Sparsity level of neural networks.')
@@ -116,6 +118,13 @@ def main():
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
 
+    if args.compute_sv:
+        size_hook = utils.get_hook(model, (nn.Linear, nn.Conv2d, nn.ConvTranspose2d))
+        utils.run_once(train_loader, model)
+        utils.detach_hook(size_hook)
+        training_sv = []
+        training_sv.append(utils.get_sv(model, size_hook))
+
     if args.prune_method != 'NONE':
         nets = [model]
         snip_loader = torch.utils.data.DataLoader(
@@ -125,6 +134,8 @@ def main():
 
         if args.prune_method == 'SNIP':
             snip.apply_snip(args, nets, snip_loader, criterion)
+
+        training_sv.append(utils.get_sv(model, size_hook))
             
     if args.half:
         model.half()
@@ -173,6 +184,10 @@ def main():
             'state_dict': model.state_dict(),
             'best_prec1': best_prec1,
         }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
+
+        if args.compute_sv and epoch % args.save_every == 0:
+                training_sv.append(utils.get_sv(model, size_hook))
+                np.save(os.path.join(args.save_dir, 'sv.npy'), training_sv)
 
 
 def train(train_loader, model, criterion, optimizer, epoch):
