@@ -4,8 +4,7 @@ import torch
 import numpy.linalg as la
 import math
 
-
-
+# s
 def get_sv(net, size_hook):
     # Here, iter_sv stores singular values for different layers
     iter_sv = []
@@ -27,8 +26,9 @@ def get_sv(net, size_hook):
             sv_result = np.zeros(20,)
             sv = SVD_Conv_Tensor_NP(layer.weight.detach().cpu().permute(2,3,1,0), size_hook[layer].input_shape[2:])
             sorted_sv = np.flip(np.sort(sv.flatten()),0)
-            top10_sv = sorted_sv[:10]
-            bot10_sv = sorted_sv[-10:]
+            sorted_sv_pos = np.array([i for i in sorted_sv if i>0])
+            top10_sv = sorted_sv_pos[:10]
+            bot10_sv = sorted_sv_pos[-10:]
             sv_result[:len(top10_sv)] = top10_sv
             sv_result[-len(bot10_sv):] = bot10_sv
             iter_sv.append(sv_result.copy())
@@ -42,6 +42,7 @@ class Hook():
         self.input_shape = np.array(input[0].shape)
 
     def close(self):
+        print(self.input_shape)
         self.hook.remove()
 
 
