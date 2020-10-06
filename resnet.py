@@ -87,7 +87,7 @@ class BasicBlock_NC(nn.Module):
     expansion = 1
 
     def __init__(self, in_planes, planes, stride=1, option='A', iter=5):
-        super(BasicBlock, self).__init__()
+        super(BasicBlock_NC, self).__init__()
         self.conv1 = NC.ONI_Conv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(planes)
         self.conv2 = NC.ONI_Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
@@ -149,7 +149,7 @@ class ResNet(nn.Module):
 
 class ResNet_NC(nn.Module):
     def __init__(self, block, num_blocks, num_classes=10):
-        super(ResNet, self).__init__()
+        super(ResNet_NC, self).__init__()
         self.in_planes = 16
 
         self.conv1 = NC.ONI_Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False)
