@@ -64,6 +64,7 @@ parser.add_argument('--sv', dest='compute_sv', action='store_true',
 parser.add_argument('--prune_method', type=str, default='NONE', choices=['NONE', 'GRASP', 'RAND', 'SNIP', 'Delta'], help='Pruning methods.')
 parser.add_argument('--prunesets_num', type=int, default=10, help='Number of datapoints for applying pruning methods.')
 parser.add_argument('--sparse_lvl', type=float, default=0.1, help='Sparsity level of neural networks.')
+parser.add_argument('--ONI', dest='ONI', action='store_true', help='set ONI on')
 best_prec1 = 0
 
 
@@ -76,7 +77,7 @@ def main():
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
 
-    model = torch.nn.DataParallel(resnet.__dict__[args.arch]())
+    model = torch.nn.DataParallel(resnet.__dict__[args.arch](ONI=args.ONI))
     model.cuda()
 
 

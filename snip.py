@@ -6,20 +6,42 @@ import types
 
 # Defining masked layer forward methods for normal layers
 def mask_Conv2d(self, x):
-    return F.conv2d(x, self.weight*self.weight_mask, self.bias, self.stride, 
-        self.padding, self.dilation, self.groups)
+    if hasattr(self, 'weight_q'):
+        weight_q = self.weight_normalization(self.weight)
+        weight_q = weight_q * self.WNScale
+        self.weight_q = weight_q
+        out = F.conv2d(input_f, weight_q*self.weight_mask, self.bias, self.stride, self.padding, self.dilation, self.groups)
+        return out
+    else:
+        return F.conv2d(x, self.weight*self.weight_mask, self.bias, self.stride, 
+            self.padding, self.dilation, self.groups)
 
 def mask_Linear(self, x):
-    return F.linear(x, self.weight*self.weight_mask, self.bias)
+    if hasattr(self, 'weight_q'):
+        weight_q = self.weight_normalization(self.weight)
+        weight_q = weight_q * self.WNScale
+        self.weight_q = weight_q
+        out = F.linear(input_f, weight_q*self.weight_mask, self.bias)
+        return out
+    else:
+        return F.linear(x, self.weight*self.weight_mask, self.bias)
 
 # Copy from nn.forward
 def mask_ConvTranspose2d(self, x, output_size = None):
-    if self.padding_mode != 'zeros':
-            raise ValueError('Only `zeros` padding mode is supported for ConvTranspose2d')
-    output_padding = self._output_padding(input, output_size, self.stride, self.padding, self.kernel_size)
-    return F.conv_transpose2d(
-            x, self.weight*self.weight_mask, self.bias, self.stride, self.padding,
-            output_padding, self.groups, self.dilation)
+    if hasattr(self, 'weight_q'):
+        output_padding = self._output_padding(input_f, output_size, self.stride, self.padding, self.kernel_size)
+        weight_q = self.weight_normalization(self.weight)
+        weight_q = weight_q * self.scale
+        self.weight_q = weight_q
+        out = F.conv_transpose2d(input_f, weight_q*self.weight_mask, self.bias, self.stride, self.padding, output_padding, self.groups, self.dilation)
+        return out
+    else:
+        if self.padding_mode != 'zeros':
+                raise ValueError('Only `zeros` padding mode is supported for ConvTranspose2d')
+        output_padding = self._output_padding(input, output_size, self.stride, self.padding, self.kernel_size)
+        return F.conv_transpose2d(
+                x, self.weight*self.weight_mask, self.bias, self.stride, self.padding,
+                output_padding, self.groups, self.dilation)
 
 # Apply SNIP pruning methods
 def apply_snip(args, nets, snip_loader, criterion):

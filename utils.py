@@ -10,7 +10,10 @@ def get_sv(net, size_hook):
     iter_sv = []
     for layer in net.modules():
         if isinstance(layer, nn.Linear):
-            weight = layer.weight
+            if hasattr(layer, 'weight_q'):
+                weight = layer.weight_q
+            else:
+                weight = layer.weight
             sv_result = np.zeros(20,)
             s,v,d = torch.svd(weight.view(weight.size(0),-1), compute_uv=False)
             top10_sv = v[:10].detach().cpu().numpy()
@@ -24,7 +27,11 @@ def get_sv(net, size_hook):
             # Notice that size_hook returns the input size of the layer, which is (Batch, in_channel, H, W)
             # We only want (H, W)
             sv_result = np.zeros(20,)
-            sv = SVD_Conv_Tensor_NP(layer.weight.detach().cpu().permute(2,3,1,0), size_hook[layer].input_shape[2:])
+            if hasattr(layer, 'weight_q'):
+                weight = layer.weight_q
+            else:
+                weight = layer.weight
+            sv = SVD_Conv_Tensor_NP(weight.detach().cpu().permute(2,3,1,0), size_hook[layer].input_shape[2:])
             sorted_sv = np.flip(np.sort(sv.flatten()),0)
             sorted_sv_pos = np.array([i for i in sorted_sv if i>0])
             top10_sv = sorted_sv_pos[:10]
