@@ -61,10 +61,17 @@ parser.add_argument('--save-every', dest='save_every',
                     type=int, default=10)
 parser.add_argument('--sv', dest='compute_sv', action='store_true',
                     help='compute_sv throughout training')
+# Following arguments are for pruning
 parser.add_argument('--prune_method', type=str, default='NONE', choices=['NONE', 'GRASP', 'RAND', 'SNIP', 'Delta'], help='Pruning methods.')
 parser.add_argument('--prunesets_num', type=int, default=10, help='Number of datapoints for applying pruning methods.')
 parser.add_argument('--sparse_lvl', type=float, default=0.1, help='Sparsity level of neural networks.')
 parser.add_argument('--ONI', dest='ONI', action='store_true', help='set ONI on')
+
+# Following arguments are for projection
+parser.add_argument('--proj', dest='proj', action='store_true', help='set projection on')
+parser.add_argument('--proj_freq', type=int, default=5, help='Apply projection every n iterations.')
+parser.add_argument('--proj_clip_to', type=float, default=0.01, help='Smallest singular values clipped to.')
+
 best_prec1 = 0
 
 
@@ -206,6 +213,9 @@ def main():
             np.save(os.path.join(args.save_dir, 'sv.npy'), training_sv)
             np.save(os.path.join(args.save_dir, 'sv_avg.npy'), training_sv_avg)
             np.save(os.path.join(args.save_dir, 'sv_std.npy'), training_sv_std)
+
+        if args.proj and epoch % args.proj_freq == 0 and epoch<args.epochs-100:
+            utils.Project_weight(model, size_hook, args.proj_clip_to)
 
 
 def train(train_loader, model, criterion, optimizer, epoch):

@@ -66,6 +66,31 @@ def get_sv(net, size_hook):
             iter_std.append(np.std(sorted_sv))
     return np.array(iter_sv), np.array(iter_avg), np.array(iter_std)
 
+def Project_weight(net, size_hook, clip_to=0.01):
+    with torch.no_grad():
+        for layer in net.modules():
+            if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.ConvTranspose2d):
+                layer.weight.data = Clip_OperatorNorm_NP(layer.weight.detach().cpu(), size_hook[layer].input_shape[2:], clip_to)
+
+def Clip_OperatorNorm_NP(filter, inp_shape, clip_to=0.01):
+    # compute the singular values using FFT
+    # first compute the transforms for each pair of input and output channels
+    filter = filter.permute(2,3,1,0)
+    transform_coeff = np.fft.fft2(filter, inp_shape, axes=[0, 1])
+
+    # now, for each transform coefficient, compute the singular values of the
+    # matrix obtained by selecting that coefficient for
+    # input-channel/output-channel pairs
+    U, D, V = np.linalg.svd(transform_coeff, compute_uv=True, full_matrices=False)
+    D_clipped = np.maximum(D, clip_to)
+    if filter.shape[2] > filter.shape[3]:
+        clipped_transform_coeff = np.matmul(U, D_clipped[..., None] * V)
+    else:
+        clipped_transform_coeff = np.matmul(U * D_clipped[..., None, :], V)
+    clipped_filter = np.fft.ifft2(clipped_transform_coeff, axes=[0, 1]).real
+    args = [range(d) for d in filter.shape]
+    return torch.Tensor(clipped_filter[np.ix_(*args)]).permute(3,2,0,1).cuda()
+
 class Hook():
     def __init__(self, module):
         self.hook = module.register_forward_hook(self.hook_fn)
