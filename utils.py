@@ -4,10 +4,31 @@ import torch
 import numpy.linalg as la
 import math
 
-# s
+# use reshape weight matrix
+# def get_sv(net, size_hook):
+#     # Here, iter_sv stores singular values for different layers
+#     iter_sv = []
+#     for layer in net.modules():
+#         if isinstance(layer, (nn.Linear, nn.Conv2d, nn.ConvTranspose2d)):
+#             if hasattr(layer, 'weight_q'):
+#                 weight = layer.weight_q
+#             else:
+#                 weight = layer.weight
+#             sv_result = np.zeros(20,)
+#             s,v,d = torch.svd(weight.view(weight.size(0),-1), compute_uv=False)
+#             top10_sv = v[:10].detach().cpu().numpy()
+#             bot10_sv = v[-10:].detach().cpu().numpy()
+#             sv_result[:len(top10_sv)] = top10_sv
+#             sv_result[-len(bot10_sv):] = bot10_sv
+#             iter_sv.append(sv_result.copy())
+#     return np.array(iter_sv)
+
+# Calculate accurate eigenvalues distribution
 def get_sv(net, size_hook):
     # Here, iter_sv stores singular values for different layers
     iter_sv = []
+    iter_std = []
+    iter_avg = []
     for layer in net.modules():
         if isinstance(layer, nn.Linear):
             if hasattr(layer, 'weight_q'):
@@ -21,6 +42,8 @@ def get_sv(net, size_hook):
             sv_result[:len(top10_sv)] = top10_sv
             sv_result[-len(bot10_sv):] = bot10_sv
             iter_sv.append(sv_result.copy())
+            iter_avg.append(np.mean(v.detach().cpu().numpy()))
+            iter_std.append(np.std(v.detach().cpu().numpy()))
         elif isinstance(layer, nn.Conv2d) or isinstance(layer, nn.ConvTranspose2d):
             # Notice that layer.weight has shape (C_out, C_in, H, W) and we want to transform it to
             # (H, W, C_in, C_out)
@@ -39,7 +62,9 @@ def get_sv(net, size_hook):
             sv_result[:len(top10_sv)] = top10_sv
             sv_result[-len(bot10_sv):] = bot10_sv
             iter_sv.append(sv_result.copy())
-    return np.array(iter_sv)
+            iter_avg.append(np.mean(sorted_sv))
+            iter_std.append(np.std(sorted_sv))
+    return np.array(iter_sv), np.array(iter_avg), np.array(iter_std)
 
 class Hook():
     def __init__(self, module):

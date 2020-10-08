@@ -127,7 +127,12 @@ def main():
         utils.run_once(train_loader, model)
         utils.detach_hook([size_hook])
         training_sv = []
-        training_sv.append(utils.get_sv(model, size_hook))
+        training_sv_avg = []
+        training_sv_std = []
+        sv, sv_avg, sv_std = utils.get_sv(model, size_hook)
+        training_sv.append(sv)
+        training_sv_avg.append(sv_avg)
+        training_sv_std.append(sv_std)
 
     if args.prune_method != 'NONE':
         nets = [model]
@@ -140,7 +145,10 @@ def main():
             snip.apply_snip(args, nets, snip_loader, criterion)
 
         if args.compute_sv:
-            training_sv.append(utils.get_sv(model, size_hook))
+            sv, sv_avg, sv_std = utils.get_sv(model, size_hook)
+            training_sv.append(sv)
+            training_sv_avg.append(sv_avg)
+            training_sv_std.append(sv_std)
             
     if args.half:
         model.half()
@@ -191,8 +199,13 @@ def main():
         }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
 
         if args.compute_sv and epoch % args.save_every == 0:
-                training_sv.append(utils.get_sv(model, size_hook))
-                np.save(os.path.join(args.save_dir, 'sv.npy'), training_sv)
+            sv, sv_avg, sv_std = utils.get_sv(model, size_hook)
+            training_sv.append(sv)
+            training_sv_avg.append(sv_avg)
+            training_sv_std.append(sv_std)
+            np.save(os.path.join(args.save_dir, 'sv.npy'), training_sv)
+            np.save(os.path.join(args.save_dir, 'sv_avg.npy'), training_sv_avg)
+            np.save(os.path.join(args.save_dir, 'sv_std.npy'), training_sv_std)
 
 
 def train(train_loader, model, criterion, optimizer, epoch):
