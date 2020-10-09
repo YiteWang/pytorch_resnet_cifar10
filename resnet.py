@@ -151,6 +151,7 @@ class ResNet_NC(nn.Module):
     def __init__(self, block, num_blocks, num_classes=10, T_iter=5):
         super(ResNet_NC, self).__init__()
         self.in_planes = 16
+        self.T_iter = T_iter
 
         self.conv1 = NC.ONI_Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False, T=T_iter)
         self.bn1 = nn.BatchNorm2d(16)
@@ -165,7 +166,7 @@ class ResNet_NC(nn.Module):
         strides = [stride] + [1]*(num_blocks-1)
         layers = []
         for stride in strides:
-            layers.append(block(self.in_planes, planes, stride, T=T_iter))
+            layers.append(block(self.in_planes, planes, stride, T_iter=self.T_iter))
             self.in_planes = planes * block.expansion
 
         return nn.Sequential(*layers)

@@ -84,7 +84,7 @@ def main():
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
 
-    model = torch.nn.DataParallel(resnet.__dict__[args.arch](ONI=args.ONI, T=args.T_iter))
+    model = torch.nn.DataParallel(resnet.__dict__[args.arch](ONI=args.ONI, T_iter=args.T_iter))
     model.cuda()
 
 
