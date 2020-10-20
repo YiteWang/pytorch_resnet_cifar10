@@ -150,7 +150,8 @@ def main():
 
         if args.prune_method == 'SNIP':
             snip.apply_snip(args, nets, snip_loader, criterion)
-
+        elif args.prune_method == 'TEST':
+            svip.apply_svip(args, nets)
         if args.compute_sv:
             sv, sv_avg, sv_std = utils.get_sv(model, size_hook)
             training_sv.append(sv)

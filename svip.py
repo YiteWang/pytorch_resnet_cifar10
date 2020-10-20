@@ -1,0 +1,98 @@
+# This pruning technique tries to prune weights that affects spectrum of layer weight
+
+import os
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import types
+import snip
+
+## Following code is for computing first and last singular values using Power iteration
+# def compute_sv(W, num_iters=1):
+#     if W.shape[0]<=W.shape[1]:
+#         WW = A.T @ A
+#     else:
+#         WW = A @ A.T
+#     sv_max = power_iteration(WW)
+#     sv_min = power_iteration(WW-sv_max*torch.eye(WW.shape[0], device='cuda'))
+#     return sv_max-sv_min
+
+# def power_iteration(W, num_iters=1):
+#     u = torch.randn(W.shape[1], device = 'cuda', requires_grad=False)
+#     u.data = F.normalize(u.data, dim=0)
+#     # v = torch.randn(W.shape[0], device = 'cuda', requires_grad=False)
+#     # v.data = F.normalize(v.data, dim=0)
+#     for i in range(num_iters):
+#         u.data = F.normalize(torch.mv(W.data, u.data), dim=0)
+#         # u.data = F.normalize(torch.mv(torch.t(W.data), v.data), dim=0)
+#     return u.T @ W @ u
+
+def get_svip_loss(net):
+    loss = 0
+    for layer in net.modules():
+        if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.ConvTranspose2d):
+            loss += compute_layer_cond(layer.weight.view(layer.weight.size(0),-1))
+        elif isinstance(layer, nn.Linear):
+            loss += compute_layer_cond(layer.weight)
+    return loss
+
+def compute_layer_cond(W):
+    sv = torch.svd(W)[1]
+    condition_number = sv[0]/sv[-1]
+    return condition_number
+
+
+# Apply SVIP pruning methods
+# TODO: support spectral norm
+def apply_svip(args, nets):
+    
+    # first add masks to each layer of nets
+    for net in nets:
+        net.train()
+        net.zero_grad()
+        for layer in net.modules():
+            snip.add_mask_ones(layer)
+
+    model = nets[0]
+
+    loss = get_svip_loss(model)
+    loss.backward()
+    
+    # prune the network using CS
+    for net in nets:
+        net_prune_snip(net, args.sparse_lvl)
+
+    print('[*] SNIP pruning done!')
+
+
+def net_prune_svip(net, sparse_lvl):
+    grad_mask = {}
+    for layer in net.modules():
+        if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
+            grad_mask[layer]=layer.weight_mask.grad
+
+    # find top sparse_lvl number of elements
+    grad_mask_flattened = torch.cat([torch.flatten(a) for a in grad_mask.values()])
+    grad_mask_sum = torch.sum(grad_mask_flattened)
+    grad_mask_flattened /= grad_mask_sum
+
+    left_params_num = int (len(grad_mask_flattened) * (1-sparse_lvl))
+    grad_mask_topk, _ = torch.topk(grad_mask_flattened, left_params_num)
+    threshold = grad_mask_topk[-1]
+
+    modified_mask = {}
+    for layer, mask in grad_mask.items():
+        modified_mask[layer] = ((mask/grad_mask_sum)<=threshold).float()
+
+    with torch.no_grad():
+        for layer in net.modules():          
+            if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
+                # Stop calculating gradients of masks
+                layer.weight_mask.data = modified_mask[layer]
+                layer.weight_mask.requires_grad = False
+
+                # Set those pruned weight as 0 as well, Here needs to address spectral_norm layer
+                if hasattr(layer, 'weight_orig'): 
+                    layer.weight_orig *= layer.weight_mask
+                else:
+                    layer.weight *= layer.weight_mask
