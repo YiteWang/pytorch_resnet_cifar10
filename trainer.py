@@ -16,6 +16,7 @@ import sampler
 import snip
 import utils
 import numpy as np
+import svip
 
 model_names = sorted(name for name in resnet.__dict__
     if name.islower() and not name.startswith("__")
@@ -62,7 +63,7 @@ parser.add_argument('--save-every', dest='save_every',
 parser.add_argument('--sv', dest='compute_sv', action='store_true',
                     help='compute_sv throughout training')
 # Following arguments are for pruning
-parser.add_argument('--prune_method', type=str, default='NONE', choices=['NONE', 'GRASP', 'RAND', 'SNIP', 'Delta'], help='Pruning methods.')
+parser.add_argument('--prune_method', type=str, default='NONE', choices=['NONE', 'GRASP', 'RAND', 'SNIP', 'Delta', 'TEST'], help='Pruning methods.')
 parser.add_argument('--prunesets_num', type=int, default=10, help='Number of datapoints for applying pruning methods.')
 parser.add_argument('--sparse_lvl', type=float, default=0.1, help='Sparsity level of neural networks.')
 parser.add_argument('--ONI', dest='ONI', action='store_true', help='set ONI on')

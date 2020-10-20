@@ -31,9 +31,9 @@ def get_svip_loss(net):
     loss = 0
     for layer in net.modules():
         if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.ConvTranspose2d):
-            loss += compute_layer_cond(layer.weight.view(layer.weight.size(0),-1))
+            loss += compute_layer_cond((layer.weight*layer.weight_mask).view(layer.weight.size(0),-1))
         elif isinstance(layer, nn.Linear):
-            loss += compute_layer_cond(layer.weight)
+            loss += compute_layer_cond(layer.weight*layer.weight_mask)
     return loss
 
 def compute_layer_cond(W):
@@ -60,9 +60,9 @@ def apply_svip(args, nets):
     
     # prune the network using CS
     for net in nets:
-        net_prune_snip(net, args.sparse_lvl)
+        net_prune_svip(net, args.sparse_lvl)
 
-    print('[*] SNIP pruning done!')
+    print('[*] SVIP pruning done!')
 
 
 def net_prune_svip(net, sparse_lvl):
