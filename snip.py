@@ -109,7 +109,7 @@ def net_prune_snip(net, sparse_lvl):
 
 
 # RANDOM PRUNING METHODS
-def apply_rand_prune(nets, sparse_lvl, only_G):
+def apply_rand_prune(nets, sparse_lvl, only_G=False):
     # first add masks to each layer of nets
     with torch.no_grad():
         if only_G:

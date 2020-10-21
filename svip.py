@@ -38,7 +38,14 @@ def get_svip_loss(net):
 
 def compute_layer_cond(W):
     sv = torch.svd(W)[1]
-    condition_number = sv[0]/sv[-1]
+#     try:
+#         condition_number = sv[0]/sv[-1] + sv[1]/sv[-2] + + sv[2]/sv[-3]
+#     except:
+#         try:
+#             condition_number = sv[0]/sv[-1] + sv[1]/sv[-2]
+#         except:
+#             condition_number = sv[0]/sv[-1]
+    condition_number = -sv.sum()/sv[-1]
     return condition_number
 
 
@@ -73,7 +80,7 @@ def net_prune_svip(net, sparse_lvl):
 
     # find top sparse_lvl number of elements
     grad_mask_flattened = torch.cat([torch.flatten(a) for a in grad_mask.values()])
-    grad_mask_sum = torch.sum(grad_mask_flattened)
+    grad_mask_sum = torch.abs(torch.sum(grad_mask_flattened))
     grad_mask_flattened /= grad_mask_sum
 
     left_params_num = int (len(grad_mask_flattened) * (1-sparse_lvl))
@@ -83,6 +90,8 @@ def net_prune_svip(net, sparse_lvl):
     modified_mask = {}
     for layer, mask in grad_mask.items():
         modified_mask[layer] = ((mask/grad_mask_sum)<=threshold).float()
+        a = modified_mask[layer]
+        print(((a!=0).float().sum()/a.numel()))
 
     with torch.no_grad():
         for layer in net.modules():          

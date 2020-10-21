@@ -153,6 +153,8 @@ def main():
             snip.apply_snip(args, nets, snip_loader, criterion)
         elif args.prune_method == 'TEST':
             svip.apply_svip(args, nets)
+        elif args.prune_method == 'RAND':
+            snip.apply_rand_prune(nets, args.sparse_lvl)
         if args.compute_sv:
             sv, sv_avg, sv_std = utils.get_sv(model, size_hook)
             training_sv.append(sv)
