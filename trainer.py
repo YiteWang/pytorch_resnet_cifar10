@@ -68,6 +68,7 @@ parser.add_argument('--prunesets_num', type=int, default=10, help='Number of dat
 parser.add_argument('--sparse_lvl', type=float, default=0.1, help='Sparsity level of neural networks.')
 parser.add_argument('--ONI', dest='ONI', action='store_true', help='set ONI on')
 parser.add_argument('--T_iter', type=int, default=5, help='Number of iterations for ONI.')
+parser.add_argument('--iter_prune', dest='iter_prune', action='store_true')
 # Following arguments are for projection
 parser.add_argument('--proj', dest='proj', action='store_true', help='set projection on')
 parser.add_argument('--proj_freq', type=int, default=5, help='Apply projection every n iterations.')
