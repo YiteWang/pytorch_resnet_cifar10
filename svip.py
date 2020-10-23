@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import types
 import snip
+import math
 
 ## Following code is for computing first and last singular values using Power iteration
 # def compute_sv(W, num_iters=1):
@@ -63,14 +64,14 @@ def apply_svip(args, nets):
     model = nets[0]
 
     if args.iter_prune:
-        num_iter = int(np.log(args.sparse_lvl)/np.log(0.8))
+        num_iter = round(math.log(args.sparse_lvl, 0.8))
         for i in range(num_iter):
             loss = get_svip_loss(model)
             loss.backward()
             
             # prune the network using CS
             for net in nets:
-                net_prune_svip(net, 0.8**(num_iter+1))
+                net_prune_svip(net, 0.8**(i+1))
     else:
         loss = get_svip_loss(model)
         loss.backward()
