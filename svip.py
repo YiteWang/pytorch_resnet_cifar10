@@ -47,6 +47,7 @@ def compute_layer_cond(W):
 #         except:
 #             condition_number = sv[0]/sv[-1]
     condition_number = sv.sum()
+#     condition_number = torch.log(sv+1e-5).sum()
     return condition_number
 
 

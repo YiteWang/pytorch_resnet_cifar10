@@ -32,7 +32,7 @@ parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet32',
                     ' (default: resnet32)')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
-parser.add_argument('--epochs', default=200, type=int, metavar='N',
+parser.add_argument('--epochs', default=160, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
@@ -65,6 +65,7 @@ parser.add_argument('--sv', dest='compute_sv', action='store_true',
 # Following arguments are for pruning
 parser.add_argument('--prune_method', type=str, default='NONE', choices=['NONE', 'GRASP', 'RAND', 'SNIP', 'Delta', 'TEST'], help='Pruning methods.')
 parser.add_argument('--prunesets_num', type=int, default=10, help='Number of datapoints for applying pruning methods.')
+parser.add_argument('--sparse_iter', type=float, default=1, help='Sparsity level of neural networks.')
 parser.add_argument('--sparse_lvl', type=float, default=0.1, help='Sparsity level of neural networks.')
 parser.add_argument('--ONI', dest='ONI', action='store_true', help='set ONI on')
 parser.add_argument('--T_iter', type=int, default=5, help='Number of iterations for ONI.')
@@ -80,7 +81,8 @@ best_prec1 = 0
 def main():
     global args, best_prec1
     args = parser.parse_args()
-
+    args.sparse_lvl = 0.8 ** args.sparse_iter
+    print(args.sparse_lvl)
 
     # Check the save_dir exists or not
     if not os.path.exists(args.save_dir):
@@ -171,7 +173,7 @@ def main():
                                 weight_decay=args.weight_decay)
 
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
-                                                        milestones=[100, 150], last_epoch=args.start_epoch - 1)
+                                                        milestones=[80, 120], last_epoch=args.start_epoch - 1)
 
     if args.arch in ['resnet1202', 'resnet110']:
         # for resnet1202 original paper uses lr=0.01 for first 400 minibatches for warm-up
