@@ -105,6 +105,7 @@ def net_prune_svip(net, sparse_lvl):
         modified_mask[layer] = ((mask/grad_mask_sum)>=threshold).float()
         a = modified_mask[layer]
         print(((a!=0).float().sum()/a.numel()))
+    print('-'*20)
 
     with torch.no_grad():
         for layer in net.modules():          

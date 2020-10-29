@@ -187,7 +187,6 @@ def resnet20(ONI=False, T_iter=5):
     else:
         return ResNet(BasicBlock, [3, 3, 3])
 
-
 def resnet32():
     return ResNet(BasicBlock, [5, 5, 5])
 

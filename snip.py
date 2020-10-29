@@ -55,7 +55,7 @@ def apply_snip(args, nets, snip_loader, criterion):
     model = nets[0]
     data_iter = iter(snip_loader)
     # Let the neural network run one forward pass to get connect sensitivity (CS)
-    for i in range(int(args.prunesets_num/30)+1):
+    for i in range(10):
         (input, target) = data_iter.next()
         target = target.cuda()
         input_var = input.cuda()
@@ -93,6 +93,9 @@ def net_prune_snip(net, sparse_lvl):
     modified_mask = {}
     for layer, mask in grad_mask.items():
         modified_mask[layer] = ((mask/grad_mask_sum)>=threshold).float()
+        a = modified_mask[layer]
+        print(((a!=0).float().sum()/a.numel()))
+    print('-'*20)
 
     with torch.no_grad():
         for layer in net.modules():          

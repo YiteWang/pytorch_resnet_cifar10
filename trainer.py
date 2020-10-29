@@ -9,6 +9,7 @@ import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data
+from Utils import load
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import resnet
@@ -17,17 +18,16 @@ import snip
 import utils
 import numpy as np
 import svip
+import torchvision.models as models
 
 model_names = sorted(name for name in resnet.__dict__
     if name.islower() and not name.startswith("__")
                      and name.startswith("resnet")
                      and callable(resnet.__dict__[name]))
 
-print(model_names)
-
 parser = argparse.ArgumentParser(description='Propert ResNets for CIFAR10 in pytorch')
 parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet32',
-                    choices=model_names,
+                    # choices=model_names,
                     help='model architecture: ' + ' | '.join(model_names) +
                     ' (default: resnet32)')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
@@ -42,6 +42,7 @@ parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
+parser.add_argument('--dataset', default='cifar10', choices=['cifar10', 'tiny-imagenet', 'imagenet'])
 parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)')
 parser.add_argument('--print-freq', '-p', default=50, type=int,
@@ -87,9 +88,7 @@ def main():
     # Check the save_dir exists or not
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
-
-    model = torch.nn.DataParallel(resnet.__dict__[args.arch](ONI=args.ONI, T_iter=args.T_iter))
-    model.cuda()
+    
 
 
     # optionally resume from a checkpoint
@@ -107,27 +106,50 @@ def main():
 
     cudnn.benchmark = True
 
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-    train_dataset = datasets.CIFAR10(root='./data', train=True, transform=transforms.Compose([
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomCrop(32, 4),
-            transforms.ToTensor(),
-            normalize,
-        ]), download=True)
+    if args.dataset =='cifar10':
+        num_classes = 10
+        print('Loading {} dataset.'.format(args.dataset))
+        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                         std=[0.229, 0.224, 0.225])
+        train_dataset = datasets.CIFAR10(root='./data', train=True, transform=transforms.Compose([
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomCrop(32, 4),
+                transforms.ToTensor(),
+                normalize,
+            ]), download=True)
 
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=args.batch_size, shuffle=True,
-        num_workers=args.workers, pin_memory=True)
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset,
+            batch_size=args.batch_size, shuffle=True,
+            num_workers=args.workers, pin_memory=True)
 
-    val_loader = torch.utils.data.DataLoader(
-        datasets.CIFAR10(root='./data', train=False, transform=transforms.Compose([
-            transforms.ToTensor(),
-            normalize,
-        ])),
-        batch_size=128, shuffle=False,
-        num_workers=args.workers, pin_memory=True)
+        val_loader = torch.utils.data.DataLoader(
+            datasets.CIFAR10(root='./data', train=False, transform=transforms.Compose([
+                transforms.ToTensor(),
+                normalize,
+            ])),
+            batch_size=128, shuffle=False,
+            num_workers=args.workers, pin_memory=True)
+
+    elif args.dataset == 'tiny-imagenet':
+        args.batch_size = 256
+        args.lr = 0.2
+        args.epochs = 200
+        print('Loading {} dataset.'.format(args.dataset))
+        input_shape, num_classes = load.dimension(args.dataset) 
+        train_dataset, train_loader = load.dataloader(args.dataset, args.batch_size, True, args.workers)
+        _, val_loader = load.dataloader(args.dataset, 128, False, args.workers)
+
+    if args.arch == 'resnet20':
+        print('Creating {} model.'.format(args.arch))
+        model = torch.nn.DataParallel(resnet.__dict__[args.arch](ONI=args.ONI, T_iter=args.T_iter))
+        model.cuda()
+    elif args.arch == 'resnet18':
+        print('Creating {} model.'.format(args.arch))
+        # model = load.model(args.arch, 'tinyimagenet')(input_shape, 
+        #                                              num_classes).cuda()
+        model = models.resnet18().cuda()
+        utils.kaiming_initialize(model)
 
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
@@ -149,7 +171,7 @@ def main():
         nets = [model]
         snip_loader = torch.utils.data.DataLoader(
         train_dataset,
-        batch_size=30, shuffle=False,
+        batch_size=num_classes, shuffle=False,
         num_workers=args.workers, pin_memory=True, sampler=sampler.BalancedBatchSampler(train_dataset))
 
         if args.prune_method == 'SNIP':
@@ -171,8 +193,11 @@ def main():
     optimizer = torch.optim.SGD(model.parameters(), args.lr,
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
-
-    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
+    if args.dataset ==  'tiny-imagenet':
+        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
+                                                        milestones=[100, 150], last_epoch=args.start_epoch - 1)
+    else:
+        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
                                                         milestones=[80, 120], last_epoch=args.start_epoch - 1)
 
     if args.arch in ['resnet1202', 'resnet110']:
