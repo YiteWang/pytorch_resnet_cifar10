@@ -42,7 +42,7 @@ parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
-parser.add_argument('--dataset', default='cifar10', choices=['cifar10', 'tiny-imagenet', 'imagenet'])
+parser.add_argument('--dataset', default='cifar10', choices=['cifar10', 'tiny-imagenet', 'cifar100'])
 parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)')
 parser.add_argument('--print-freq', '-p', default=50, type=int,
@@ -140,15 +140,26 @@ def main():
         train_dataset, train_loader = load.dataloader(args.dataset, args.batch_size, True, args.workers)
         _, val_loader = load.dataloader(args.dataset, 128, False, args.workers)
 
+    elif args.dataset == 'cifar100':
+        args.batch_size = 128
+        args.lr = 0.2
+        args.epochs = 160
+        args.weight_decay = 5e-4
+        input_shape, num_classes = load.dimension(args.dataset) 
+        train_dataset, train_loader = load.dataloader(args.dataset, args.batch_size, True, args.workers)
+        _, val_loader = load.dataloader(args.dataset, 128, False, args.workers)
+
     if args.arch == 'resnet20':
         print('Creating {} model.'.format(args.arch))
         model = torch.nn.DataParallel(resnet.__dict__[args.arch](ONI=args.ONI, T_iter=args.T_iter))
         model.cuda()
     elif args.arch == 'resnet18':
         print('Creating {} model.'.format(args.arch))
-        # model = load.model(args.arch, 'tinyimagenet')(input_shape, 
-        #                                              num_classes).cuda()
-        model = models.resnet18().cuda()
+        model = load.model(args.arch, 'tinyimagenet')(input_shape, 
+                                                     num_classes).cuda()
+        # model = models.resnet18()
+        # model.fc = nn.Linear(512, num_classes)
+        model.cuda()
         utils.kaiming_initialize(model)
 
     # define loss function (criterion) and optimizer
@@ -169,13 +180,14 @@ def main():
 
     if args.prune_method != 'NONE':
         nets = [model]
-        snip_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=num_classes, shuffle=False,
-        num_workers=args.workers, pin_memory=True, sampler=sampler.BalancedBatchSampler(train_dataset))
+        # snip_loader = torch.utils.data.DataLoader(
+        # train_dataset,
+        # batch_size=num_classes, shuffle=False,
+        # num_workers=args.workers, pin_memory=True, sampler=sampler.BalancedBatchSampler(train_dataset))
 
         if args.prune_method == 'SNIP':
-            snip.apply_snip(args, nets, snip_loader, criterion)
+            snip.apply_snip(args, nets, data_loader, criterion, num_classes=num_classes)
+            # snip.apply_snip(args, nets, snip_loader, criterion)
         elif args.prune_method == 'TEST':
             svip.apply_svip(args, nets)
         elif args.prune_method == 'RAND':
@@ -196,6 +208,9 @@ def main():
     if args.dataset ==  'tiny-imagenet':
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
                                                         milestones=[100, 150], last_epoch=args.start_epoch - 1)
+    elif args.dataset ==  'cifar100':
+        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
+                                                        milestones=[60, 120], gamma = 0.2, last_epoch=args.start_epoch - 1)
     else:
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
                                                         milestones=[80, 120], last_epoch=args.start_epoch - 1)

@@ -4,6 +4,27 @@ import torch.nn as nn
 import torch.nn.functional as F
 import types
 
+def GraSP_fetch_data(dataloader_iter, num_classes, samples_per_class):
+    datas = [[] for _ in range(num_classes)]
+    labels = [[] for _ in range(num_classes)]
+    mark = dict()
+    # dataloader_iter = iter(dataloader)
+    while True:
+        inputs, targets = next(dataloader_iter)
+        for idx in range(inputs.shape[0]):
+            x, y = inputs[idx:idx+1], targets[idx:idx+1]
+            category = y.item()
+            if len(datas[category]) == samples_per_class:
+                mark[category] = True
+                continue
+            datas[category].append(x)
+            labels[category].append(y)
+        if len(mark) == num_classes:
+            break
+
+    X, y = torch.cat([torch.cat(_, 0) for _ in datas]), torch.cat([torch.cat(_) for _ in labels]).view(-1)
+    return X, y
+
 # Defining masked layer forward methods for normal layers
 def mask_Conv2d(self, x):
     if hasattr(self, 'weight_q'):
@@ -44,7 +65,7 @@ def mask_ConvTranspose2d(self, x, output_size = None):
                 output_padding, self.groups, self.dilation)
 
 # Apply SNIP pruning methods
-def apply_snip(args, nets, snip_loader, criterion):
+def apply_snip(args, nets, data_loader, criterion, num_classes, samples_per_class = 10):
     
     # first add masks to each layer of nets
     for net in nets:
@@ -53,10 +74,12 @@ def apply_snip(args, nets, snip_loader, criterion):
         for layer in net.modules():
             add_mask_ones(layer)
     model = nets[0]
-    data_iter = iter(snip_loader)
+    # data_iter = iter(snip_loader)
+    data_iter = iter(data_loader)
     # Let the neural network run one forward pass to get connect sensitivity (CS)
-    for i in range(10):
-        (input, target) = data_iter.next()
+    for i in range(samples_per_class):
+        (input, target) = GraSP_fetch_data(data_iter, num_classes, 1)
+        # (input, target) = data_iter.next()
         target = target.cuda()
         input_var = input.cuda()
         target_var = target
