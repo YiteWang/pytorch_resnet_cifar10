@@ -142,7 +142,7 @@ def main():
 
     elif args.dataset == 'cifar100':
         args.batch_size = 128
-        args.lr = 0.2
+        args.lr = 0.1
         args.epochs = 160
         args.weight_decay = 5e-4
         input_shape, num_classes = load.dimension(args.dataset) 
@@ -156,7 +156,8 @@ def main():
     elif args.arch == 'resnet18':
         print('Creating {} model.'.format(args.arch))
         model = load.model(args.arch, 'tinyimagenet')(input_shape, 
-                                                     num_classes).cuda()
+                                                     num_classes,
+                                                     dense_classifier = True).cuda()
         # model = models.resnet18()
         # model.fc = nn.Linear(512, num_classes)
         model.cuda()
@@ -186,7 +187,7 @@ def main():
         # num_workers=args.workers, pin_memory=True, sampler=sampler.BalancedBatchSampler(train_dataset))
 
         if args.prune_method == 'SNIP':
-            snip.apply_snip(args, nets, data_loader, criterion, num_classes=num_classes)
+            snip.apply_snip(args, nets, train_loader, criterion, num_classes=num_classes)
             # snip.apply_snip(args, nets, snip_loader, criterion)
         elif args.prune_method == 'TEST':
             svip.apply_svip(args, nets)
