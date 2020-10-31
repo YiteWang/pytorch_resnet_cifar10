@@ -64,15 +64,27 @@ def apply_svip(args, nets):
 
     model = nets[0]
 
+    # if args.iter_prune:
+    #     num_iter = round(math.log(args.sparse_lvl, 0.8))
+    #     for i in range(num_iter):
+    #         loss = get_svip_loss(model)
+    #         loss.backward()
+            
+    #         # prune the network using CS
+    #         for net in nets:
+    #             net_prune_svip(net, 0.8**(i+1))
+
     if args.iter_prune:
-        num_iter = round(math.log(args.sparse_lvl, 0.8))
+        num_iter = 100
         for i in range(num_iter):
             loss = get_svip_loss(model)
             loss.backward()
             
             # prune the network using CS
             for net in nets:
-                net_prune_svip(net, 0.8**(i+1))
+                net_prune_svip(net, args.sparse_lvl**((i+1)/num_iter))
+            if i%10 == 0:
+                print('Prune ' + str(i) + ' iterations.')
     else:
         loss = get_svip_loss(model)
         loss.backward()
