@@ -99,7 +99,7 @@ class Hook():
         self.input_shape = np.array(input[0].shape)
 
     def close(self):
-        print(self.input_shape)
+        # print(self.input_shape)
         self.hook.remove()
 
 
