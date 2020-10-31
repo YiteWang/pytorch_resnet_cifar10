@@ -32,7 +32,8 @@ def dimension(dataset):
 def get_transform(size, padding, mean, std, preprocess):
     transform = []
     if preprocess:
-        transform.append(transforms.RandomResizedCrop(size=size, scale=(0.1, 1.0), ratio=(0.8, 1.25)))
+        # transform.append(transforms.RandomResizedCrop(size=size, scale=(0.1, 1.0), ratio=(0.8, 1.25)))
+        transform.append(transforms.RandomCrop(size=size, padding=padding))
         transform.append(transforms.RandomHorizontalFlip())
     transform.append(transforms.ToTensor())
     transform.append(transforms.Normalize(mean, std))
