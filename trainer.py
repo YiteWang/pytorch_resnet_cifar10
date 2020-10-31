@@ -142,7 +142,7 @@ def main():
 
     elif args.dataset == 'cifar100':
         args.batch_size = 128
-        args.lr = 0.1
+        args.lr = 0.01
         args.epochs = 160
         args.weight_decay = 5e-4
         input_shape, num_classes = load.dimension(args.dataset) 
