@@ -66,8 +66,8 @@ parser.add_argument('--sv', dest='compute_sv', action='store_true',
 # Following arguments are for pruning
 parser.add_argument('--prune_method', type=str, default='NONE', choices=['NONE', 'GRASP', 'RAND', 'SNIP', 'Delta', 'TEST'], help='Pruning methods.')
 parser.add_argument('--prunesets_num', type=int, default=10, help='Number of datapoints for applying pruning methods.')
-parser.add_argument('--sparse_iter', type=float, default=1, help='Sparsity level of neural networks.')
-parser.add_argument('--sparse_lvl', type=float, default=0.1, help='Sparsity level of neural networks.')
+parser.add_argument('--sparse_iter', type=float, default=0, help='Sparsity level of neural networks.')
+parser.add_argument('--sparse_lvl', type=float, default=1, help='Sparsity level of neural networks.')
 parser.add_argument('--ONI', dest='ONI', action='store_true', help='set ONI on')
 parser.add_argument('--T_iter', type=int, default=5, help='Number of iterations for ONI.')
 parser.add_argument('--iter_prune', dest='iter_prune', action='store_true')
@@ -161,7 +161,7 @@ def main():
         # model = models.resnet18()
         # model.fc = nn.Linear(512, num_classes)
         model.cuda()
-        utils.kaiming_initialize(model)
+        # utils.kaiming_initialize(model)
 
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
@@ -205,6 +205,7 @@ def main():
 
     optimizer = torch.optim.SGD(model.parameters(), args.lr,
                                 momentum=args.momentum,
+                                nesterov = True,
                                 weight_decay=args.weight_decay)
     if args.dataset ==  'tiny-imagenet':
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
