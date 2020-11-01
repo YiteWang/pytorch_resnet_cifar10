@@ -89,7 +89,7 @@ def main():
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
     
-
+    torch.manual_seed(1)
 
     # optionally resume from a checkpoint
     if args.resume:
