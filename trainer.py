@@ -10,6 +10,7 @@ import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data
 from Utils import load
+from Models import apolo_resnet
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import resnet
@@ -107,29 +108,33 @@ def main():
     cudnn.benchmark = True
 
     if args.dataset =='cifar10':
-        num_classes = 10
+        # num_classes = 10
+        # print('Loading {} dataset.'.format(args.dataset))
+        # normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+        #                                  std=[0.229, 0.224, 0.225])
+        # train_dataset = datasets.CIFAR10(root='./data', train=True, transform=transforms.Compose([
+        #         transforms.RandomHorizontalFlip(),
+        #         transforms.RandomCrop(32, 4),
+        #         transforms.ToTensor(),
+        #         normalize,
+        #     ]), download=True)
+
+        # train_loader = torch.utils.data.DataLoader(
+        #     train_dataset,
+        #     batch_size=args.batch_size, shuffle=True,
+        #     num_workers=args.workers, pin_memory=True)
+
+        # val_loader = torch.utils.data.DataLoader(
+        #     datasets.CIFAR10(root='./data', train=False, transform=transforms.Compose([
+        #         transforms.ToTensor(),
+        #         normalize,
+        #     ])),
+        #     batch_size=128, shuffle=False,
+        #     num_workers=args.workers, pin_memory=True)
         print('Loading {} dataset.'.format(args.dataset))
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                         std=[0.229, 0.224, 0.225])
-        train_dataset = datasets.CIFAR10(root='./data', train=True, transform=transforms.Compose([
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomCrop(32, 4),
-                transforms.ToTensor(),
-                normalize,
-            ]), download=True)
-
-        train_loader = torch.utils.data.DataLoader(
-            train_dataset,
-            batch_size=args.batch_size, shuffle=True,
-            num_workers=args.workers, pin_memory=True)
-
-        val_loader = torch.utils.data.DataLoader(
-            datasets.CIFAR10(root='./data', train=False, transform=transforms.Compose([
-                transforms.ToTensor(),
-                normalize,
-            ])),
-            batch_size=128, shuffle=False,
-            num_workers=args.workers, pin_memory=True)
+        input_shape, num_classes = load.dimension(args.dataset) 
+        train_dataset, train_loader = load.dataloader(args.dataset, args.batch_size, True, args.workers)
+        _, val_loader = load.dataloader(args.dataset, 128, False, args.workers)
 
     elif args.dataset == 'tiny-imagenet':
         args.batch_size = 256
@@ -155,9 +160,15 @@ def main():
         model.cuda()
     elif args.arch == 'resnet18':
         print('Creating {} model.'.format(args.arch))
-        model = load.model(args.arch, 'tinyimagenet')(input_shape, 
-                                                     num_classes,
-                                                     dense_classifier = True).cuda()
+        # Using resnet18 from Synflow
+        # model = load.model(args.arch, 'tinyimagenet')(input_shape, 
+        #                                              num_classes,
+        #                                              dense_classifier = True).cuda()
+
+        # Using resnet110 from Apollo
+        model = apolo_resnet.ResNet(110, num_classes=num_classes)
+
+        # Using resnet18 from torchvision
         # model = models.resnet18()
         # model.fc = nn.Linear(512, num_classes)
         model.cuda()
