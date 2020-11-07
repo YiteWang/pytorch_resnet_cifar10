@@ -161,17 +161,20 @@ def main():
     elif args.arch == 'resnet18':
         print('Creating {} model.'.format(args.arch))
         # Using resnet18 from Synflow
-        # model = load.model(args.arch, 'tinyimagenet')(input_shape, 
-        #                                              num_classes,
-        #                                              dense_classifier = True).cuda()
-
+        model = load.model(args.arch, 'tinyimagenet')(input_shape, 
+                                                     num_classes,
+                                                     dense_classifier = True).cuda()
+    elif args.arch == 'resnet110' or args.arch == 'resnet110full':
         # Using resnet110 from Apollo
-        model = apolo_resnet.ResNet(110, num_classes=num_classes)
+        # model = apolo_resnet.ResNet(110, num_classes=num_classes)
+        model = load.model(args.arch, 'lottery')(input_shape, 
+                                             num_classes,
+                                             dense_classifier = True).cuda()
 
         # Using resnet18 from torchvision
         # model = models.resnet18()
         # model.fc = nn.Linear(512, num_classes)
-        model.cuda()
+        # model.cuda()
         # utils.kaiming_initialize(model)
 
     print('Number of parameters of model: {}.'.format(count_parameters(model)))

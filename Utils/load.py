@@ -9,6 +9,7 @@ from Models import tinyimagenet_vgg
 from Models import tinyimagenet_resnet
 from Models import imagenet_vgg
 from Models import imagenet_resnet
+from Models import lottery_resnet_full
 # from Pruners import pruners
 from Utils import custom_datasets
 
@@ -110,6 +111,7 @@ def model(model_architecture, model_class):
         'resnet44': lottery_resnet.resnet44,
         'resnet56': lottery_resnet.resnet56,
         'resnet110': lottery_resnet.resnet110,
+        'resnet110full': lottery_resnet_full.resnet110,
         'resnet1202': lottery_resnet.resnet1202,
         'wide-resnet20': lottery_resnet.wide_resnet20,
         'wide-resnet32': lottery_resnet.wide_resnet32,
