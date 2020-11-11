@@ -7,52 +7,43 @@ import torch.nn.functional as F
 import types
 import snip
 import math
+import torch.optim as opt
+import numpy as np
 
-## Following code is for computing first and last singular values using Power iteration
-# def compute_sv(W, num_iters=1):
-#     if W.shape[0]<=W.shape[1]:
-#         WW = A.T @ A
-#     else:
-#         WW = A @ A.T
-#     sv_max = power_iteration(WW)
-#     sv_min = power_iteration(WW-sv_max*torch.eye(WW.shape[0], device='cuda'))
-#     return sv_max-sv_min
+NUM_REINIT = 10
 
-# def power_iteration(W, num_iters=1):
-#     u = torch.randn(W.shape[1], device = 'cuda', requires_grad=False)
-#     u.data = F.normalize(u.data, dim=0)
-#     # v = torch.randn(W.shape[0], device = 'cuda', requires_grad=False)
-#     # v.data = F.normalize(v.data, dim=0)
-#     for i in range(num_iters):
-#         u.data = F.normalize(torch.mv(W.data, u.data), dim=0)
-#         # u.data = F.normalize(torch.mv(torch.t(W.data), v.data), dim=0)
-#     return u.T @ W @ u
+def deconv_orth_dist(conv, stride = 2):
+    kernel = conv.weight
+    padding = int(np.floor((kernel.shape[2]-1)/conv.stride[0])*conv.stride[0])
+    [o_c, i_c, w, h] = kernel.shape
+    output = torch.conv2d(kernel*conv.weight_mask, kernel*conv.weight_mask, stride=stride, padding=padding)
+    target = torch.zeros((o_c, o_c, output.shape[-2], output.shape[-1])).cuda()
+    ct = int(np.floor(output.shape[-1]/2))
+    target[:,:,ct,ct] = torch.eye(o_c).cuda()
+    return torch.norm( output - target )
+
+def svip_reinit(net):
+    optimizer = opt.Adam(net.parameters(), lr=0.01)
+    for i in range(NUM_REINIT):
+        optimizer.zero_grad()
+        loss = 0
+        for layer in net.modules():
+            if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.ConvTranspose2d):
+                loss += deconv_orth_dist(layer, layer.stride[0])
+            elif isinstance(layer, nn.Linear):
+                loss += torch.norm(torch.svd(layer.weight)[1]-torch.ones(min(layer.weight.shape)).cuda())
+        loss.backward()
+    optimizer.zero_grad()
+
 
 def get_svip_loss(net):
     loss = 0
     for layer in net.modules():
         if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.ConvTranspose2d):
-            loss += compute_layer_cond((layer.weight*layer.weight_mask).view(layer.weight.size(0),-1))
+            loss += deconv_orth_dist(layer, layer.stride[0])
         elif isinstance(layer, nn.Linear):
-            loss += compute_layer_cond(layer.weight*layer.weight_mask)
+            loss += torch.norm(torch.svd(layer.weight*layer.weight_mask)[1]-torch.ones(min(layer.weight.shape)).cuda())
     return loss
-
-# def deconv_orth_dist(kernel, stride = 2, padding = 1):
-#     [o_c, i_c, w, h] = kernel.shape
-#     output = torch.conv2d(kernel, kernel, stride=stride, padding=padding)
-#     target = torch.zeros((o_c, o_c, output.shape[-2], output.shape[-1])).cuda()
-#     ct = int(np.floor(output.shape[-1]/2))
-#     target[:,:,ct,ct] = torch.eye(o_c).cuda()
-#     return torch.norm( output - target )
-
-# def get_svip_loss(net):
-#     loss = 0
-#     for layer in net.modules():
-#         if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.ConvTranspose2d):
-#             loss += compute_layer_cond(layer.weight*layer.weight_mask)
-#         elif isinstance(layer, nn.Linear):
-#             loss += compute_layer_cond(layer.weight*layer.weight_mask)
-#     return loss
 
 def compute_layer_cond(W):
     sv = torch.svd(W)[1]
@@ -100,8 +91,11 @@ def apply_svip(args, nets):
             # prune the network using CS
             for net in nets:
                 net_prune_svip(net, args.sparse_lvl**((i+1)/num_iter))
+                # svip_reinit(net)
+
             if i%10 == 0:
                 print('Prune ' + str(i) + ' iterations.')
+
     else:
         loss = get_svip_loss(model)
         loss.backward()

@@ -18,7 +18,7 @@ import sampler
 import snip
 import utils
 import numpy as np
-import svip
+import svfp
 import torchvision.models as models
 
 model_names = sorted(name for name in resnet.__dict__
@@ -205,7 +205,8 @@ def main():
             snip.apply_snip(args, nets, train_loader, criterion, num_classes=num_classes)
             # snip.apply_snip(args, nets, snip_loader, criterion)
         elif args.prune_method == 'TEST':
-            svip.apply_svip(args, nets)
+            # svip.apply_svip(args, nets)
+            svfp.apply_svip(args, nets)
         elif args.prune_method == 'RAND':
             snip.apply_rand_prune(nets, args.sparse_lvl)
         if args.compute_sv:
