@@ -209,6 +209,11 @@ def main():
             svfp.apply_svip(args, nets)
         elif args.prune_method == 'RAND':
             snip.apply_rand_prune(nets, args.sparse_lvl)
+
+        save_checkpoint({
+            'state_dict': model.state_dict(),
+            'best_prec1': 0,
+        }, 0, filename=os.path.join(args.save_dir, 'postprune.th'))
         if args.compute_sv:
             sv, sv_avg, sv_std = utils.get_sv(model, size_hook)
             training_sv.append(sv)

@@ -31,8 +31,9 @@ def svip_reinit(net):
             if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.ConvTranspose2d):
                 loss += deconv_orth_dist(layer, layer.stride[0])
             elif isinstance(layer, nn.Linear):
-                loss += torch.norm(torch.svd(layer.weight)[1]-torch.ones(min(layer.weight.shape)).cuda())
+                loss += torch.norm(torch.svd(layer.weight*layer.weight_mask)[1]-torch.ones(min(layer.weight.shape)).cuda())
         loss.backward()
+        optimizer.step()
     optimizer.zero_grad()
 
 
@@ -113,6 +114,7 @@ def net_prune_svip(net, sparse_lvl):
     for layer in net.modules():
         if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
             grad_mask[layer]=torch.abs(layer.weight_mask.grad)
+            # grad_mask[layer]=layer.weight_mask.grad
 
     # find top sparse_lvl number of elements
     grad_mask_flattened = torch.cat([torch.flatten(a) for a in grad_mask.values()])
