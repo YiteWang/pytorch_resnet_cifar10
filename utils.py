@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import numpy.linalg as la
 import math
+import os
 
 # use reshape weight matrix
 # def get_sv(net, size_hook):
@@ -137,3 +138,10 @@ def kaiming_initialize(network):
             nn.init.constant_(m.weight, 1)
             nn.init.constant_(m.bias, 0)
     print('Kaiming initialization done!')
+
+def save_sparsity(network, save_path):
+    sparsity = []
+    for m in network.modules():
+        if isinstance(m, (nn.Conv2d, nn.Linear, nn.ConvTranspose2d)):
+            sparsity.append((m.weight_mask.sum()/m.weight_mask.numel()).item())
+    np.save(os.path.join(save_path, 'saved_sparsity.npy'), sparsity)

@@ -10,7 +10,7 @@ import math
 import torch.optim as opt
 import numpy as np
 
-NUM_REINIT = 10
+NUM_REINIT = 100
 
 def deconv_orth_dist(conv, stride = 2):
     kernel = conv.weight
@@ -23,7 +23,7 @@ def deconv_orth_dist(conv, stride = 2):
     return torch.norm( output - target )
 
 def svip_reinit(net):
-    optimizer = opt.Adam(net.parameters(), lr=0.01)
+    optimizer = opt.Adam(net.parameters(), lr=0.1)
     for i in range(NUM_REINIT):
         optimizer.zero_grad()
         loss = 0
@@ -108,6 +108,101 @@ def apply_svip(args, nets):
     deactivate_mask_update(net)
     print('[*] SVIP pruning done!')
 
+def apply_svip_givensparsity(args, nets, sparsity):
+    num_iter = 100
+    # first add masks to each layer of nets
+    for net in nets:
+        net.train()
+        net.zero_grad()
+        for layer in net.modules():
+            snip.add_mask_ones(layer)
+
+    model = nets[0]
+
+    # if args.iter_prune:
+    #     num_iter = round(math.log(args.sparse_lvl, 0.8))
+    #     for i in range(num_iter):
+    #         loss = get_svip_loss(model)
+    #         loss.backward()
+            
+    #         # prune the network using CS
+    #         for net in nets:
+    #             net_prune_svip(net, 0.8**(i+1))
+    applied_layer = 0
+    for layer in model.modules():
+        if isinstance(layer, (nn.Conv2d, nn.Linear, nn.ConvTranspose2d)):
+            if args.iter_prune:
+                for i in range(num_iter):
+                    loss = get_svip_loss(layer)
+                    loss.backward()
+                    net_prune_svip_layer(layer, sparsity[applied_layer]**((i+1)/num_iter))
+            else:
+                loss = get_svip_loss(layer)
+                loss.backward()
+                net_prune_svip_layer(layer, sparsity[applied_layer])
+            applied_layer += 1
+
+    deactivate_mask_update(net)
+    print('[*] SVIP pruning done!')
+
+def net_prune_svip_layer(layer, sparse_lvl):
+    assert isinstance(layer, (nn.Conv2d, nn.Linear, nn.ConvTranspose2d))
+    grad_mask=torch.abs(layer.weight_mask.grad)
+    # grad_mask[layer]=layer.weight_mask.grad
+
+    # find top sparse_lvl number of elements
+    grad_mask_flattened = torch.flatten(grad_mask)
+    grad_mask_sum = torch.abs(torch.sum(grad_mask_flattened))
+    grad_mask_flattened /= grad_mask_sum
+
+    left_params_num = int (len(grad_mask_flattened) * sparse_lvl)
+    grad_mask_topk, _ = torch.topk(grad_mask_flattened, left_params_num)
+    threshold = grad_mask_topk[-1]
+
+    modified_mask = ((grad_mask/grad_mask_sum)>=threshold).float()
+    #     print(((a!=0).float().sum()/a.numel()))
+    # print('-'*20)
+
+    layer.weight_mask.data = modified_mask
+    # layer.weight_mask.requires_grad = False
+    layer.weight_mask.grad = None
+
+    # Set those pruned weight as 0 as well, Here needs to address spectral_norm layer
+    with torch.no_grad():
+        if hasattr(layer, 'weight_orig'): 
+            layer.weight_orig *= layer.weight_mask
+        else:
+            layer.weight *= layer.weight_mask
+
+def net_prune_svip_layer_inv(layer, sparse_lvl):
+    assert isinstance(layer, (nn.Conv2d, nn.Linear, nn.ConvTranspose2d))
+    working_params = int(layer.weight_mask.sum().item())
+    grad_mask=torch.abs(layer.weight_mask.grad)
+    # grad_mask[layer]=layer.weight_mask.grad
+
+    # find top sparse_lvl number of elements
+    grad_mask_flattened = torch.flatten(grad_mask)
+    grad_mask_sum = torch.abs(torch.sum(grad_mask_flattened))
+    grad_mask_flattened /= grad_mask_sum
+
+    left_params_num = int (len(grad_mask_flattened) * sparse_lvl)
+    grad_mask_topk, _ = torch.topk(grad_mask_flattened, working_params-left_params_num)
+    threshold = grad_mask_topk[-1]
+
+    modified_mask = (((grad_mask/grad_mask_sum)<threshold) * (grad_mask!=0)).float()
+    #     print(((a!=0).float().sum()/a.numel()))
+    # print('-'*20)
+
+    layer.weight_mask.data = modified_mask
+    # layer.weight_mask.requires_grad = False
+    layer.weight_mask.grad = None
+
+    # Set those pruned weight as 0 as well, Here needs to address spectral_norm layer
+    with torch.no_grad():
+        if hasattr(layer, 'weight_orig'): 
+            layer.weight_orig *= layer.weight_mask
+        else:
+            layer.weight *= layer.weight_mask
 
 def net_prune_svip(net, sparse_lvl):
     grad_mask = {}

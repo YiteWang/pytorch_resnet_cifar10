@@ -202,18 +202,32 @@ def main():
         # num_workers=args.workers, pin_memory=True, sampler=sampler.BalancedBatchSampler(train_dataset))
 
         if args.prune_method == 'SNIP':
+            for layer in model.modules():
+                snip.add_mask_ones(layer)
+            svfp.svip_reinit(model)
+            if args.compute_sv:
+                sv, sv_avg, sv_std = utils.get_sv(model, size_hook)
+                training_sv.append(sv)
+                training_sv_avg.append(sv_avg)
+                training_sv_std.append(sv_std)
+            utils.save_sparsity(model, args.save_dir)
+            save_checkpoint({
+                'state_dict': model.state_dict(),
+                'best_prec1': 0,
+            }, 0, filename=os.path.join(args.save_dir, 'preprune.th'))
             snip.apply_snip(args, nets, train_loader, criterion, num_classes=num_classes)
             # snip.apply_snip(args, nets, snip_loader, criterion)
         elif args.prune_method == 'TEST':
+            checkpoint = torch.load('preprune.th')
+            model.load_state_dict(checkpoint['state_dict'])
             # svip.apply_svip(args, nets)
-            svfp.apply_svip(args, nets)
+            # svfp.apply_svip(args, nets)
+            given_sparsity = np.load('saved_sparsity.npy')
+            svfp.apply_svip_givensparsity(args, nets, given_sparsity)
         elif args.prune_method == 'RAND':
             snip.apply_rand_prune(nets, args.sparse_lvl)
 
-        save_checkpoint({
-            'state_dict': model.state_dict(),
-            'best_prec1': 0,
-        }, 0, filename=os.path.join(args.save_dir, 'postprune.th'))
+        # utils.save_sparsity(model, args.save_dir)
         if args.compute_sv:
             sv, sv_avg, sv_std = utils.get_sv(model, size_hook)
             training_sv.append(sv)
@@ -270,10 +284,10 @@ def main():
                 'best_prec1': best_prec1,
             }, is_best, filename=os.path.join(args.save_dir, 'checkpoint.th'))
 
-        save_checkpoint({
-            'state_dict': model.state_dict(),
-            'best_prec1': best_prec1,
-        }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
+        # save_checkpoint({
+        #     'state_dict': model.state_dict(),
+        #     'best_prec1': best_prec1,
+        # }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
 
         if args.compute_sv and epoch % args.save_every == 0:
             sv, sv_avg, sv_std = utils.get_sv(model, size_hook)
