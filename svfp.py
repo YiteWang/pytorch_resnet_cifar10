@@ -109,7 +109,7 @@ def apply_svip(args, nets):
     print('[*] SVIP pruning done!')
 
 def apply_svip_givensparsity(args, nets, sparsity):
-    num_iter = 100
+    
     # first add masks to each layer of nets
     for net in nets:
         net.train()
@@ -118,7 +118,7 @@ def apply_svip_givensparsity(args, nets, sparsity):
             snip.add_mask_ones(layer)
 
     model = nets[0]
-
+    num_iter = 10
     # if args.iter_prune:
     #     num_iter = round(math.log(args.sparse_lvl, 0.8))
     #     for i in range(num_iter):
@@ -131,11 +131,18 @@ def apply_svip_givensparsity(args, nets, sparsity):
     applied_layer = 0
     for layer in model.modules():
         if isinstance(layer, (nn.Conv2d, nn.Linear, nn.ConvTranspose2d)):
+            # print('Total param:',layer.weight.numel())
+            # if layer.weight.numel() * (1-sparsity[applied_layer])>1000:
+            #     num_iter = 10
+            # else:
+            #     num_iter = 1
             if args.iter_prune:
                 for i in range(num_iter):
                     loss = get_svip_loss(layer)
                     loss.backward()
                     net_prune_svip_layer(layer, sparsity[applied_layer]**((i+1)/num_iter))
+                # print('Actual:',(layer.weight_mask.sum()/layer.weight_mask.numel()).item())
+                # print('Expected:',sparsity[applied_layer])
             else:
                 loss = get_svip_loss(layer)
                 loss.backward()
@@ -147,22 +154,27 @@ def apply_svip_givensparsity(args, nets, sparsity):
 
 def net_prune_svip_layer(layer, sparse_lvl):
     assert isinstance(layer, (nn.Conv2d, nn.Linear, nn.ConvTranspose2d))
+    # print('before:',(layer.weight_mask.grad!=0).sum()/layer.weight_mask.grad.numel())
     grad_mask=torch.abs(layer.weight_mask.grad)
     # grad_mask[layer]=layer.weight_mask.grad
 
     # find top sparse_lvl number of elements
     grad_mask_flattened = torch.flatten(grad_mask)
-    grad_mask_sum = torch.abs(torch.sum(grad_mask_flattened))
+    # grad_mask_sum = torch.abs(torch.sum(grad_mask_flattened))
+    grad_mask_sum = 1
     grad_mask_flattened /= grad_mask_sum
 
     left_params_num = int (len(grad_mask_flattened) * sparse_lvl)
+    # print('LEFT_NUM:', left_params_num)
     grad_mask_topk, _ = torch.topk(grad_mask_flattened, left_params_num)
+
     threshold = grad_mask_topk[-1]
+    # print(((grad_mask_flattened/grad_mask_sum)>=threshold).float().sum())
 
     modified_mask = ((grad_mask/grad_mask_sum)>=threshold).float()
     #     print(((a!=0).float().sum()/a.numel()))
     # print('-'*20)
-
+    # print('after:',modified_mask.sum()/modified_mask.numel())
     layer.weight_mask.data = modified_mask
     # layer.weight_mask.requires_grad = False
     layer.weight_mask.grad = None
@@ -182,7 +194,8 @@ def net_prune_svip_layer_inv(layer, sparse_lvl):
 
     # find top sparse_lvl number of elements
     grad_mask_flattened = torch.flatten(grad_mask)
-    grad_mask_sum = torch.abs(torch.sum(grad_mask_flattened))
+    # grad_mask_sum = torch.abs(torch.sum(grad_mask_flattened))
+    grad_mask_sum = 1
     grad_mask_flattened /= grad_mask_sum
 
     left_params_num = int (len(grad_mask_flattened) * sparse_lvl)

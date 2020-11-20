@@ -233,6 +233,9 @@ def main():
             training_sv.append(sv)
             training_sv_avg.append(sv_avg)
             training_sv_std.append(sv_std)
+
+        print('[*] Sparsity after pruning: ', utils.check_sparsity(model))
+
             
     if args.half:
         model.half()
