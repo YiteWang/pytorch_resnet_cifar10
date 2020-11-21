@@ -20,6 +20,8 @@ import utils
 import numpy as np
 import svfp
 import torchvision.models as models
+import special_init
+import torch.nn.init as init
 
 model_names = sorted(name for name in resnet.__dict__
     if name.islower() and not name.startswith("__")
@@ -176,6 +178,12 @@ def main():
         # model.fc = nn.Linear(512, num_classes)
         # model.cuda()
         # utils.kaiming_initialize(model)
+    
+    for layer in model.modules():
+        if isinstance(layer, nn.Linear):
+            init.orthogonal_(layer.weight.data)
+        elif isinstance(layer, (nn.Conv2d, nn.ConvTranspose2d)):
+            special_init.DeltaOrthogonal_init(layer.weight.data)
 
     print('Number of parameters of model: {}.'.format(count_parameters(model)))
     # define loss function (criterion) and optimizer
@@ -225,7 +233,13 @@ def main():
             given_sparsity = np.load('saved_sparsity.npy')
             svfp.apply_svip_givensparsity(args, nets, given_sparsity)
         elif args.prune_method == 'RAND':
-            snip.apply_rand_prune(nets, args.sparse_lvl)
+            checkpoint = torch.load('preprune.th')
+            model.load_state_dict(checkpoint['state_dict'])
+            # snip.apply_rand_prune(nets, args.sparse_lvl)
+            given_sparsity = np.load('saved_sparsity.npy')
+            snip.apply_rand_prune_givensparsity(nets, given_sparsity)
+        elif args.prune_method == 'Delta':
+            snip.apply_prune_active(nets)
 
         # utils.save_sparsity(model, args.save_dir)
         if args.compute_sv:

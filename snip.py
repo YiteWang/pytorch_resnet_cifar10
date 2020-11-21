@@ -146,6 +146,46 @@ def apply_rand_prune(nets, sparse_lvl, only_G=False):
                 for layer in net.modules():
                     add_mask_rand(layer, sparse_lvl)
 
+def apply_rand_prune(nets, sparse_lvl, only_G=False):
+    # first add masks to each layer of nets
+    with torch.no_grad():
+        if only_G:
+            for layer in nets[0].modules():
+                add_mask_rand(layer, sparse_lvl)
+        else:
+            for net in nets:
+                for layer in net.modules():
+                    add_mask_rand(layer, sparse_lvl)
+
+def apply_rand_prune_givensparsity(nets, sparsity):
+    applied_layer = 0
+    with torch.no_grad():
+        for net in nets:
+            for layer in net.modules():
+                if isinstance(layer, (nn.Linear, nn.Conv2d, nn.ConvTranspose2d)):
+                    add_mask_rand(layer, sparsity[applied_layer])
+                    applied_layer += 1
+
+def apply_prune_active(nets):
+    with torch.no_grad():
+        for net in nets:
+            for layer in net.modules():
+                if isinstance(layer, (nn.Linear, nn.Conv2d, nn.ConvTranspose2d)):
+                    add_mask_current_active(layer)
+
+def add_mask_current_active(layer):
+    # It means such layers are using spectral_norm layers
+    with torch.no_grad():
+        if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
+            # Handling spectral_norm layer
+            if hasattr(layer, 'weight_orig'):
+                layer.weight_mask = (layer.weight_orig.data!=0).float()
+                layer.weight_orig.data = layer.weight_mask * layer.weight_orig.data
+            else:
+                layer.weight_mask = (layer.weight.data!=0).float()
+                layer.weight.data = layer.weight_mask * layer.weight
+            modify_mask_forward(layer)
+
 def add_mask_rand(layer, sparse_lvl):
     # It means such layers are using spectral_norm layers
     with torch.no_grad():
@@ -157,7 +197,7 @@ def add_mask_rand(layer, sparse_lvl):
             else:
                 layer.weight_mask = (torch.empty(layer.weight.size(), device=layer.weight.device).uniform_() > (1-sparse_lvl)).float()
                 layer.weight.data = layer.weight_mask * layer.weight
-        modify_mask_forward(layer)
+            modify_mask_forward(layer)
 
 
 def add_mask_ones(layer):
@@ -168,7 +208,7 @@ def add_mask_ones(layer):
                 layer.weight_mask = torch.ones_like(layer.weight_orig, requires_grad = True, device=layer.weight_orig.device)
             else:
                 layer.weight_mask = torch.ones_like(layer.weight, requires_grad = True, device=layer.weight.device)
-        modify_mask_forward(layer)
+            modify_mask_forward(layer)
 
 def activate_weight_mask(layer):
     with torch.no_grad():
