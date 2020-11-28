@@ -78,6 +78,9 @@ parser.add_argument('--iter_prune', dest='iter_prune', action='store_true')
 parser.add_argument('--proj', dest='proj', action='store_true', help='set projection on')
 parser.add_argument('--proj_freq', type=int, default=5, help='Apply projection every n iterations.')
 parser.add_argument('--proj_clip_to', type=float, default=0.02, help='Smallest singular values clipped to.')
+parser.add_argument('--ortho', dest='ortho', action='store_true', help='add orthogonal regularizer on.')
+
+parser.add_argument('--pre_epochs', type=int, default=0, help='Number of pretraining epochs.')
 
 best_prec1 = 0
 
@@ -197,10 +200,98 @@ def main():
         training_sv = []
         training_sv_avg = []
         training_sv_std = []
-        sv, sv_avg, sv_std = utils.get_sv(model, size_hook)
+        training_svmax = []
+        training_sv50 = [] # 50% singular value
+        training_sv80 = [] # 80% singular value
+        training_kclip12 = [] # singular values larger than 1e-12
+        training_sv50p = [] # 50% non-zero singular value
+        training_sv80p = [] # 80% non-zero singular value
+        training_kavg = [] # max condition number/average condition number
+        sv, sv_avg, sv_std, svmax, sv50, sv80, kclip12, sv50p, sv80p, kavg = utils.get_sv(model, size_hook)
         training_sv.append(sv)
         training_sv_avg.append(sv_avg)
         training_sv_std.append(sv_std)
+        training_svmax.append(svmax)
+        training_sv50.append(sv50)
+        training_sv80.append(sv80)
+        training_kclip12.append(kclip12)
+        training_sv50p.append(sv50p)
+        training_sv80p.append(sv80p)
+        training_kavg.append(kavg)
+            
+    if args.half:
+        model.half()
+        criterion.half()
+
+    optimizer = torch.optim.SGD(model.parameters(), args.lr,
+                                momentum=args.momentum,
+                                nesterov = True,
+                                weight_decay=args.weight_decay)
+    if args.dataset ==  'tiny-imagenet':
+        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
+                                                        milestones=[100, 150], last_epoch=args.start_epoch - 1)
+    elif args.dataset ==  'cifar100':
+        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
+                                                        milestones=[60, 120], gamma = 0.2, last_epoch=args.start_epoch - 1)
+    else:
+        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
+                                                        milestones=[80, 120], last_epoch=args.start_epoch - 1)
+
+    # if args.arch in ['resnet1202', 'resnet110']:
+    #     # for resnet1202 original paper uses lr=0.01 for first 400 minibatches for warm-up
+    #     # then switch back. In this setup it will correspond for first epoch.
+    #     for param_group in optimizer.param_groups:
+    #         param_group['lr'] = args.lr*0.1
+    for epoch in range(args.pre_epochs):
+
+        # train for one epoch
+        print('current lr {:.5e}'.format(optimizer.param_groups[0]['lr']))
+        train(train_loader, model, criterion, optimizer, epoch)
+        lr_scheduler.step()
+
+        # evaluate on validation set
+        prec1 = validate(val_loader, model, criterion)
+
+        # remember best prec@1 and save checkpoint
+        is_best = prec1 > best_prec1
+        best_prec1 = max(prec1, best_prec1)
+
+        if epoch > 0 and epoch % args.save_every == 0:
+            save_checkpoint({
+                'epoch': epoch + 1,
+                'state_dict': model.state_dict(),
+                'best_prec1': best_prec1,
+            }, is_best, filename=os.path.join(args.save_dir, 'checkpoint.th'))
+
+        # save_checkpoint({
+        #     'state_dict': model.state_dict(),
+        #     'best_prec1': best_prec1,
+        # }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
+
+        if args.compute_sv and epoch % args.save_every == 0:
+            sv, sv_avg, sv_std, svmax, sv50, sv80, kclip12, sv50p, sv80p, kavg = utils.get_sv(model, size_hook)
+            training_sv.append(sv)
+            training_sv_avg.append(sv_avg)
+            training_sv_std.append(sv_std)
+            training_svmax.append(svmax)
+            training_sv50.append(sv50)
+            training_sv80.append(sv80)
+            training_kclip12.append(kclip12)
+            training_sv50p.append(sv50p)
+            training_sv80p.append(sv80p)
+            training_kavg.append(kavg)
+            np.save(os.path.join(args.save_dir, 'sv.npy'), training_sv)
+            np.save(os.path.join(args.save_dir, 'sv_avg.npy'), training_sv_avg)
+            np.save(os.path.join(args.save_dir, 'sv_std.npy'), training_sv_std)
+            np.save(os.path.join(args.save_dir, 'sv_svmax.npy'), training_svmax)
+            np.save(os.path.join(args.save_dir, 'sv_sv50.npy'), training_sv50)
+            np.save(os.path.join(args.save_dir, 'sv_sv80.npy'), training_sv80)
+            np.save(os.path.join(args.save_dir, 'sv_kclip12.npy'), training_kclip12)
+            np.save(os.path.join(args.save_dir, 'sv_sv50p.npy'), training_sv50p)
+            np.save(os.path.join(args.save_dir, 'sv_sv80p.npy'), training_sv80p)
+            np.save(os.path.join(args.save_dir, 'sv_kavg.npy'), training_kavg)
+
+    print('[*] {} pre-training epochs done'.format(args.pre_epochs))
 
     if args.prune_method != 'NONE':
         nets = [model]
@@ -226,8 +317,8 @@ def main():
             snip.apply_snip(args, nets, train_loader, criterion, num_classes=num_classes)
             # snip.apply_snip(args, nets, snip_loader, criterion)
         elif args.prune_method == 'TEST':
-            checkpoint = torch.load('preprune.th')
-            model.load_state_dict(checkpoint['state_dict'])
+            # checkpoint = torch.load('preprune.th')
+            # model.load_state_dict(checkpoint['state_dict'])
             # svip.apply_svip(args, nets)
             # svfp.apply_svip(args, nets)
             given_sparsity = np.load('saved_sparsity.npy')
@@ -250,37 +341,12 @@ def main():
 
         print('[*] Sparsity after pruning: ', utils.check_sparsity(model))
 
-            
-    if args.half:
-        model.half()
-        criterion.half()
-
-    optimizer = torch.optim.SGD(model.parameters(), args.lr,
-                                momentum=args.momentum,
-                                nesterov = True,
-                                weight_decay=args.weight_decay)
-    if args.dataset ==  'tiny-imagenet':
-        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
-                                                        milestones=[100, 150], last_epoch=args.start_epoch - 1)
-    elif args.dataset ==  'cifar100':
-        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
-                                                        milestones=[60, 120], gamma = 0.2, last_epoch=args.start_epoch - 1)
-    else:
-        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
-                                                        milestones=[80, 120], last_epoch=args.start_epoch - 1)
-
-    # if args.arch in ['resnet1202', 'resnet110']:
-    #     # for resnet1202 original paper uses lr=0.01 for first 400 minibatches for warm-up
-    #     # then switch back. In this setup it will correspond for first epoch.
-    #     for param_group in optimizer.param_groups:
-    #         param_group['lr'] = args.lr*0.1
-
-
     if args.evaluate:
         validate(val_loader, model, criterion)
         return
 
-    for epoch in range(args.start_epoch, args.epochs):
+    # for epoch in range(args.start_epoch, args.epochs):
+    for epoch in range(args.pre_epochs, args.epochs):
 
         # train for one epoch
         print('current lr {:.5e}'.format(optimizer.param_groups[0]['lr']))
@@ -316,7 +382,7 @@ def main():
             np.save(os.path.join(args.save_dir, 'sv_std.npy'), training_sv_std)
 
 
-def train(train_loader, model, criterion, optimizer, epoch):
+def train(train_loader, model, criterion, optimizer, epoch, ortho=False):
     """
         Run one train epoch
     """
@@ -343,6 +409,10 @@ def train(train_loader, model, criterion, optimizer, epoch):
         # compute output
         output = model(input_var)
         loss = criterion(output, target_var)
+
+        # add orthogonal loss
+        if ortho:
+            loss += 0.01*svfp.get_svip_loss(model)
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
