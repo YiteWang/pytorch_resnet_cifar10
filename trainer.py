@@ -293,6 +293,9 @@ def main():
 
     print('[*] {} pre-training epochs done'.format(args.pre_epochs))
 
+    # checkpoint = torch.load('preprune.th')
+    # model.load_state_dict(checkpoint['state_dict'])
+    
     if args.prune_method != 'NONE':
         nets = [model]
         # snip_loader = torch.utils.data.DataLoader(
@@ -324,8 +327,8 @@ def main():
             given_sparsity = np.load('saved_sparsity.npy')
             svfp.apply_svip_givensparsity(args, nets, given_sparsity)
         elif args.prune_method == 'RAND':
-            checkpoint = torch.load('preprune.th')
-            model.load_state_dict(checkpoint['state_dict'])
+            # checkpoint = torch.load('preprune.th')
+            # model.load_state_dict(checkpoint['state_dict'])
             # snip.apply_rand_prune(nets, args.sparse_lvl)
             given_sparsity = np.load('saved_sparsity.npy')
             snip.apply_rand_prune_givensparsity(nets, given_sparsity)
@@ -334,10 +337,27 @@ def main():
 
         # utils.save_sparsity(model, args.save_dir)
         if args.compute_sv:
-            sv, sv_avg, sv_std = utils.get_sv(model, size_hook)
+            sv, sv_avg, sv_std, svmax, sv50, sv80, kclip12, sv50p, sv80p, kavg = utils.get_sv(model, size_hook)
             training_sv.append(sv)
             training_sv_avg.append(sv_avg)
             training_sv_std.append(sv_std)
+            training_svmax.append(svmax)
+            training_sv50.append(sv50)
+            training_sv80.append(sv80)
+            training_kclip12.append(kclip12)
+            training_sv50p.append(sv50p)
+            training_sv80p.append(sv80p)
+            training_kavg.append(kavg)
+            np.save(os.path.join(args.save_dir, 'sv.npy'), training_sv)
+            np.save(os.path.join(args.save_dir, 'sv_avg.npy'), training_sv_avg)
+            np.save(os.path.join(args.save_dir, 'sv_std.npy'), training_sv_std)
+            np.save(os.path.join(args.save_dir, 'sv_svmax.npy'), training_svmax)
+            np.save(os.path.join(args.save_dir, 'sv_sv50.npy'), training_sv50)
+            np.save(os.path.join(args.save_dir, 'sv_sv80.npy'), training_sv80)
+            np.save(os.path.join(args.save_dir, 'sv_kclip12.npy'), training_kclip12)
+            np.save(os.path.join(args.save_dir, 'sv_sv50p.npy'), training_sv50p)
+            np.save(os.path.join(args.save_dir, 'sv_sv80p.npy'), training_sv80p)
+            np.save(os.path.join(args.save_dir, 'sv_kavg.npy'), training_kavg)
 
         print('[*] Sparsity after pruning: ', utils.check_sparsity(model))
 
@@ -345,8 +365,22 @@ def main():
         validate(val_loader, model, criterion)
         return
 
-    # for epoch in range(args.start_epoch, args.epochs):
-    for epoch in range(args.pre_epochs, args.epochs):
+    # reinitialize
+    optimizer = torch.optim.SGD(model.parameters(), args.lr,
+                                momentum=args.momentum,
+                                nesterov = True,
+                                weight_decay=args.weight_decay)
+    if args.dataset ==  'tiny-imagenet':
+        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
+                                                        milestones=[100, 150], last_epoch=args.start_epoch - 1)
+    elif args.dataset ==  'cifar100':
+        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
+                                                        milestones=[60, 120], gamma = 0.2, last_epoch=args.start_epoch - 1)
+    else:
+        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
+                                                        milestones=[80, 120], last_epoch=args.start_epoch - 1)
+    for epoch in range(args.start_epoch, args.epochs):
+    # for epoch in range(args.pre_epochs, args.epochs):
 
         # train for one epoch
         print('current lr {:.5e}'.format(optimizer.param_groups[0]['lr']))
@@ -373,13 +407,27 @@ def main():
         # }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
 
         if args.compute_sv and epoch % args.save_every == 0:
-            sv, sv_avg, sv_std = utils.get_sv(model, size_hook)
+            sv, sv_avg, sv_std, svmax, sv50, sv80, kclip12, sv50p, sv80p, kavg = utils.get_sv(model, size_hook)
             training_sv.append(sv)
             training_sv_avg.append(sv_avg)
             training_sv_std.append(sv_std)
+            training_svmax.append(svmax)
+            training_sv50.append(sv50)
+            training_sv80.append(sv80)
+            training_kclip12.append(kclip12)
+            training_sv50p.append(sv50p)
+            training_sv80p.append(sv80p)
+            training_kavg.append(kavg)
             np.save(os.path.join(args.save_dir, 'sv.npy'), training_sv)
             np.save(os.path.join(args.save_dir, 'sv_avg.npy'), training_sv_avg)
             np.save(os.path.join(args.save_dir, 'sv_std.npy'), training_sv_std)
+            np.save(os.path.join(args.save_dir, 'sv_svmax.npy'), training_svmax)
+            np.save(os.path.join(args.save_dir, 'sv_sv50.npy'), training_sv50)
+            np.save(os.path.join(args.save_dir, 'sv_sv80.npy'), training_sv80)
+            np.save(os.path.join(args.save_dir, 'sv_kclip12.npy'), training_kclip12)
+            np.save(os.path.join(args.save_dir, 'sv_sv50p.npy'), training_sv50p)
+            np.save(os.path.join(args.save_dir, 'sv_sv80p.npy'), training_sv80p)
+            np.save(os.path.join(args.save_dir, 'sv_kavg.npy'), training_kavg)
 
 
 def train(train_loader, model, criterion, optimizer, epoch, ortho=False):
