@@ -68,8 +68,8 @@ def get_sv(net, size_hook):
                 sorted_sv = np.flip(np.sort(sv.flatten()),0)
                 sorted_sv_pos = np.array([i for i in sorted_sv if i>0])
                 sorted_sv_clip = np.array([i for i in sorted_sv if i>1e-12])
-                top10_sv = sorted_sv_pos[:10]
-                bot10_sv = sorted_sv_pos[-10:]
+                top10_sv = sorted_sv[:10]
+                bot10_sv = sorted_sv[-10:]
                 sv_result[:len(top10_sv)] = top10_sv
                 sv_result[-len(bot10_sv):] = bot10_sv
                 # iter_sv.append(sv_result.copy())

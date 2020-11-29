@@ -140,7 +140,8 @@ def apply_svip_givensparsity(args, nets, sparsity):
                 for i in range(num_iter):
                     loss = get_svip_loss(layer)
                     loss.backward()
-                    net_prune_svip_layer(layer, sparsity[applied_layer]**((i+1)/num_iter))
+                    # net_prune_svip_layer(layer, sparsity[applied_layer]**((i+1)/num_iter))
+                    net_prune_svip_layer_inv(layer, sparsity[applied_layer]**((i+1)/num_iter))
                 # print('Actual:',(layer.weight_mask.sum()/layer.weight_mask.numel()).item())
                 # print('Expected:',sparsity[applied_layer])
             else:
@@ -155,23 +156,24 @@ def apply_svip_givensparsity(args, nets, sparsity):
 def net_prune_svip_layer(layer, sparse_lvl):
     assert isinstance(layer, (nn.Conv2d, nn.Linear, nn.ConvTranspose2d))
     # print('before:',(layer.weight_mask.grad!=0).sum()/layer.weight_mask.grad.numel())
-    grad_mask=torch.abs(layer.weight_mask.grad)
-    # grad_mask[layer]=layer.weight_mask.grad
+    # grad_mask=torch.abs(layer.weight_mask.grad)
+    grad_mask=layer.weight_mask.grad
 
     # find top sparse_lvl number of elements
     grad_mask_flattened = torch.flatten(grad_mask)
+    grad_mask_flattened_nonzero = torch.Tensor([c for c in grad_mask_flattened if c!=0]).to(grad_mask_flattened.device)
     # grad_mask_sum = torch.abs(torch.sum(grad_mask_flattened))
     grad_mask_sum = 1
-    grad_mask_flattened /= grad_mask_sum
+    grad_mask_flattened_nonzero /= grad_mask_sum
 
     left_params_num = int (len(grad_mask_flattened) * sparse_lvl)
     # print('LEFT_NUM:', left_params_num)
-    grad_mask_topk, _ = torch.topk(grad_mask_flattened, left_params_num)
+    grad_mask_topk, _ = torch.topk(grad_mask_flattened_nonzero, left_params_num)
 
     threshold = grad_mask_topk[-1]
     # print(((grad_mask_flattened/grad_mask_sum)>=threshold).float().sum())
 
-    modified_mask = ((grad_mask/grad_mask_sum)>=threshold).float()
+    modified_mask = (((grad_mask/grad_mask_sum)>=threshold)*(grad_mask!=0)).float()
     #     print(((a!=0).float().sum()/a.numel()))
     # print('-'*20)
     # print('after:',modified_mask.sum()/modified_mask.numel())
@@ -189,17 +191,18 @@ def net_prune_svip_layer(layer, sparse_lvl):
 def net_prune_svip_layer_inv(layer, sparse_lvl):
     assert isinstance(layer, (nn.Conv2d, nn.Linear, nn.ConvTranspose2d))
     working_params = int(layer.weight_mask.sum().item())
-    grad_mask=torch.abs(layer.weight_mask.grad)
-    # grad_mask[layer]=layer.weight_mask.grad
+    # grad_mask=torch.abs(layer.weight_mask.grad)
+    grad_mask=layer.weight_mask.grad
 
     # find top sparse_lvl number of elements
     grad_mask_flattened = torch.flatten(grad_mask)
+    grad_mask_flattened_nonzero = torch.Tensor([c for c in grad_mask_flattened if c!=0]).to(grad_mask_flattened.device)
     # grad_mask_sum = torch.abs(torch.sum(grad_mask_flattened))
     grad_mask_sum = 1
-    grad_mask_flattened /= grad_mask_sum
+    grad_mask_flattened_nonzero /= grad_mask_sum
 
     left_params_num = int (len(grad_mask_flattened) * sparse_lvl)
-    grad_mask_topk, _ = torch.topk(grad_mask_flattened, working_params-left_params_num)
+    grad_mask_topk, _ = torch.topk(grad_mask_flattened_nonzero, working_params-left_params_num)
     threshold = grad_mask_topk[-1]
 
     modified_mask = (((grad_mask/grad_mask_sum)<threshold) * (grad_mask!=0)).float()
