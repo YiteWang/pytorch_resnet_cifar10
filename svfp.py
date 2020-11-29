@@ -140,8 +140,8 @@ def apply_svip_givensparsity(args, nets, sparsity):
                 for i in range(num_iter):
                     loss = get_svip_loss(layer)
                     loss.backward()
-                    # net_prune_svip_layer(layer, sparsity[applied_layer]**((i+1)/num_iter))
-                    net_prune_svip_layer_inv(layer, sparsity[applied_layer]**((i+1)/num_iter))
+                    net_prune_svip_layer(layer, sparsity[applied_layer]**((i+1)/num_iter))
+                    # net_prune_svip_layer_inv(layer, sparsity[applied_layer]**((i+1)/num_iter))
                 # print('Actual:',(layer.weight_mask.sum()/layer.weight_mask.numel()).item())
                 # print('Expected:',sparsity[applied_layer])
             else:
@@ -161,7 +161,7 @@ def net_prune_svip_layer(layer, sparse_lvl):
 
     # find top sparse_lvl number of elements
     grad_mask_flattened = torch.flatten(grad_mask)
-    grad_mask_flattened_nonzero = torch.Tensor([c for c in grad_mask_flattened if c!=0]).to(grad_mask_flattened.device)
+    grad_mask_flattened_nonzero = torch.flatten(grad_mask_flattened[torch.nonzero(grad_mask_flattened)])
     # grad_mask_sum = torch.abs(torch.sum(grad_mask_flattened))
     grad_mask_sum = 1
     grad_mask_flattened_nonzero /= grad_mask_sum
@@ -196,7 +196,7 @@ def net_prune_svip_layer_inv(layer, sparse_lvl):
 
     # find top sparse_lvl number of elements
     grad_mask_flattened = torch.flatten(grad_mask)
-    grad_mask_flattened_nonzero = torch.Tensor([c for c in grad_mask_flattened if c!=0]).to(grad_mask_flattened.device)
+    grad_mask_flattened_nonzero = torch.flatten(grad_mask_flattened[torch.nonzero(grad_mask_flattened)])
     # grad_mask_sum = torch.abs(torch.sum(grad_mask_flattened))
     grad_mask_sum = 1
     grad_mask_flattened_nonzero /= grad_mask_sum
