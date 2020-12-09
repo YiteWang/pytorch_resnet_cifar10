@@ -10,6 +10,7 @@ from Models import tinyimagenet_resnet
 from Models import imagenet_vgg
 from Models import imagenet_resnet
 from Models import lottery_resnet_full
+from Models import lottery_vgg_full
 # from Pruners import pruners
 from Utils import custom_datasets
 
@@ -104,6 +105,8 @@ def model(model_architecture, model_class):
         'vgg13-bn' : lottery_vgg.vgg13_bn,
         'vgg16' : lottery_vgg.vgg16,
         'vgg16-bn' : lottery_vgg.vgg16_bn,
+        'vgg16full' : lottery_vgg_full.vgg16,
+        'vgg16full-bn' : lottery_vgg_full.vgg16_bn,
         'vgg19' : lottery_vgg.vgg19,
         'vgg19-bn' : lottery_vgg.vgg19_bn,
         'resnet20': lottery_resnet.resnet20,

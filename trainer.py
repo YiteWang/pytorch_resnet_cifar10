@@ -81,7 +81,7 @@ parser.add_argument('--proj_clip_to', type=float, default=0.02, help='Smallest s
 parser.add_argument('--ortho', dest='ortho', action='store_true', help='add orthogonal regularizer on.')
 
 parser.add_argument('--pre_epochs', type=int, default=0, help='Number of pretraining epochs.')
-
+parser.add_argument('--s_name', type=str, default='saved_sparsity', help='saved_sparsity.')
 best_prec1 = 0
 
 
@@ -175,7 +175,12 @@ def main():
         model = load.model(args.arch, 'lottery')(input_shape, 
                                              num_classes,
                                              dense_classifier = True).cuda()
-
+    elif args.arch == 'vgg16full' or args.arch == 'vgg16full-bn':
+        # Using resnet110 from Apollo
+        # model = apolo_resnet.ResNet(110, num_classes=num_classes)
+        model = load.model(args.arch, 'lottery')(input_shape, 
+                                             num_classes,
+                                             dense_classifier = True).cuda()
         # Using resnet18 from torchvision
         # model = models.resnet18()
         # model.fc = nn.Linear(512, num_classes)
@@ -306,7 +311,7 @@ def main():
         if args.prune_method == 'SNIP':
             for layer in model.modules():
                 snip.add_mask_ones(layer)
-            svfp.svip_reinit(model)
+            # svfp.svip_reinit(model)
             if args.compute_sv:
                 sv, sv_avg, sv_std = utils.get_sv(model, size_hook)
                 training_sv.append(sv)
@@ -327,10 +332,13 @@ def main():
             given_sparsity = np.load('saved_sparsity.npy')
             svfp.apply_svip_givensparsity(args, nets, given_sparsity)
         elif args.prune_method == 'RAND':
+            utils.save_sparsity(model, args.save_dir)
             # checkpoint = torch.load('preprune.th')
             # model.load_state_dict(checkpoint['state_dict'])
             # snip.apply_rand_prune(nets, args.sparse_lvl)
-            given_sparsity = np.load('saved_sparsity.npy')
+            given_sparsity = np.load(args.save_dir+'/saved_sparsity.npy')
+            given_sparsity[-2] = 0.1
+            # given_sparsity = np.load(args.s_name+'.npy')
             snip.apply_rand_prune_givensparsity(nets, given_sparsity)
         elif args.prune_method == 'Delta':
             snip.apply_prune_active(nets)
