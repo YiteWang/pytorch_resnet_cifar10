@@ -82,6 +82,7 @@ parser.add_argument('--ortho', dest='ortho', action='store_true', help='add orth
 
 parser.add_argument('--pre_epochs', type=int, default=0, help='Number of pretraining epochs.')
 parser.add_argument('--s_name', type=str, default='saved_sparsity', help='saved_sparsity.')
+parser.add_argument('--s_value', type=float, default=1, help='given changing sparsity.')
 best_prec1 = 0
 
 
@@ -332,12 +333,15 @@ def main():
             given_sparsity = np.load('saved_sparsity.npy')
             svfp.apply_svip_givensparsity(args, nets, given_sparsity)
         elif args.prune_method == 'RAND':
-            utils.save_sparsity(model, args.save_dir)
+            # utils.save_sparsity(model, args.save_dir)
             # checkpoint = torch.load('preprune.th')
             # model.load_state_dict(checkpoint['state_dict'])
             # snip.apply_rand_prune(nets, args.sparse_lvl)
-            given_sparsity = np.load(args.save_dir+'/saved_sparsity.npy')
-            given_sparsity[-2] = 0.1
+            # given_sparsity = np.load(args.save_dir+'/saved_sparsity.npy')
+            num_apply_layer = utils.get_apply_layer(model)
+            given_sparsity = np.ones(num_apply_layer,)
+            given_sparsity[-2] = args.s_value
+            print(given_sparsity)
             # given_sparsity = np.load(args.s_name+'.npy')
             snip.apply_rand_prune_givensparsity(nets, given_sparsity)
         elif args.prune_method == 'Delta':

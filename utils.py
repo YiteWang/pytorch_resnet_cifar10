@@ -168,6 +168,14 @@ def save_sparsity(network, save_path):
             sparsity.append((m.weight_mask.sum()/m.weight_mask.numel()).item())
     np.save(os.path.join(save_path, 'saved_sparsity.npy'), sparsity)
 
+def check_layer_sparsity(network):
+    sparsity = []
+    for m in network.modules():
+        if isinstance(m, (nn.Conv2d, nn.Linear, nn.ConvTranspose2d)):
+            sparsity.append((m.weight_mask.sum()/m.weight_mask.numel()).item())
+    return np.array(sparsity)
+
+
 def check_sparsity(network):
     param_remain = 0
     param_total = 0
@@ -176,3 +184,10 @@ def check_sparsity(network):
             param_remain += m.weight_mask.sum()
             param_total += m.weight_mask.numel()
     return param_remain/param_total
+
+def get_apply_layer(network):
+    num_layers = 0
+    for m in network.modules():
+        if isinstance(m, (nn.Conv2d, nn.Linear, nn.ConvTranspose2d)):
+            num_layers += 1
+    return num_layers
