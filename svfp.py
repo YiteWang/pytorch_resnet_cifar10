@@ -21,6 +21,7 @@ def deconv_orth_dist(conv, stride = 2):
     ct = int(np.floor(output.shape[-1]/2))
     target[:,:,ct,ct] = torch.eye(o_c).cuda()
     return torch.norm( output - target )
+    # return torch.norm(output)
 
 def svip_reinit(net):
     optimizer = opt.Adam(net.parameters(), lr=0.1)
@@ -36,6 +37,21 @@ def svip_reinit(net):
         optimizer.step()
     optimizer.zero_grad()
 
+
+def get_svip_loss_with_target(net, target_layer=[]):
+    loss = 0
+    applied_layer = 0
+    for layer in net.modules():
+        if isinstance(layer, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
+            if applied_layer in target_layer:
+                if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.ConvTranspose2d):
+                    loss += deconv_orth_dist(layer, layer.stride[0])
+                elif isinstance(layer, nn.Linear):
+                    # loss += torch.norm(torch.svd(layer.weight*layer.weight_mask)[1]-torch.ones(min(layer.weight.shape)).cuda())
+                    loss += torch.norm((layer.weight*layer.weight_mask) @ (layer.weight*layer.weight_mask).T - torch.eye(layer.weight.size(0)).cuda())
+                # loss += torch.norm(torch.svd(layer.weight*layer.weight_mask)[1])
+            applied_layer += 1
+    return loss
 
 def get_svip_loss(net):
     loss = 0
@@ -140,8 +156,8 @@ def apply_svip_givensparsity(args, nets, sparsity):
                 for i in range(num_iter):
                     loss = get_svip_loss(layer)
                     loss.backward()
-                    net_prune_svip_layer(layer, sparsity[applied_layer]**((i+1)/num_iter))
-                    # net_prune_svip_layer_inv(layer, sparsity[applied_layer]**((i+1)/num_iter))
+                    # net_prune_svip_layer(layer, sparsity[applied_layer]**((i+1)/num_iter))
+                    net_prune_svip_layer_inv(layer, sparsity[applied_layer]**((i+1)/num_iter))
                 # print('Actual:',(layer.weight_mask.sum()/layer.weight_mask.numel()).item())
                 # print('Expected:',sparsity[applied_layer])
             else:

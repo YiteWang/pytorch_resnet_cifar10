@@ -22,6 +22,7 @@ import svfp
 import torchvision.models as models
 import special_init
 import torch.nn.init as init
+import time
 
 model_names = sorted(name for name in resnet.__dict__
     if name.islower() and not name.startswith("__")
@@ -83,6 +84,7 @@ parser.add_argument('--ortho', dest='ortho', action='store_true', help='add orth
 parser.add_argument('--pre_epochs', type=int, default=0, help='Number of pretraining epochs.')
 parser.add_argument('--s_name', type=str, default='saved_sparsity', help='saved_sparsity.')
 parser.add_argument('--s_value', type=float, default=1, help='given changing sparsity.')
+parser.add_argument("--layer",  nargs="*",  type=int,  default=[],)
 best_prec1 = 0
 
 
@@ -153,9 +155,9 @@ def main():
 
     elif args.dataset == 'cifar100':
         args.batch_size = 128
-        args.lr = 0.01
+        # args.lr = 0.01
         args.epochs = 160
-        args.weight_decay = 5e-4
+        # args.weight_decay = 5e-4
         input_shape, num_classes = load.dimension(args.dataset) 
         train_dataset, train_loader = load.dataloader(args.dataset, args.batch_size, True, args.workers)
         _, val_loader = load.dataloader(args.dataset, 128, False, args.workers)
@@ -340,7 +342,10 @@ def main():
             # given_sparsity = np.load(args.save_dir+'/saved_sparsity.npy')
             num_apply_layer = utils.get_apply_layer(model)
             given_sparsity = np.ones(num_apply_layer,)
-            given_sparsity[-2] = args.s_value
+            # given_sparsity[-4] = args.s_value
+            # given_sparsity[-5] = args.s_value
+            for layer in args.layer:
+                given_sparsity[layer] = args.s_value
             print(given_sparsity)
             # given_sparsity = np.load(args.s_name+'.npy')
             snip.apply_rand_prune_givensparsity(nets, given_sparsity)
@@ -396,7 +401,7 @@ def main():
 
         # train for one epoch
         print('current lr {:.5e}'.format(optimizer.param_groups[0]['lr']))
-        train(train_loader, model, criterion, optimizer, epoch)
+        train(train_loader, model, criterion, optimizer, epoch, ortho=args.ortho)
         lr_scheduler.step()
 
         # evaluate on validation set
@@ -412,6 +417,8 @@ def main():
                 'state_dict': model.state_dict(),
                 'best_prec1': best_prec1,
             }, is_best, filename=os.path.join(args.save_dir, 'checkpoint.th'))
+            if args.prune_method !='NONE':
+                print(utils.check_layer_sparsity(model))   
 
         # save_checkpoint({
         #     'state_dict': model.state_dict(),
@@ -472,7 +479,9 @@ def train(train_loader, model, criterion, optimizer, epoch, ortho=False):
 
         # add orthogonal loss
         if ortho:
-            loss += 0.01*svfp.get_svip_loss(model)
+            # start_time = time.time()
+            loss += 0.0001*svfp.get_svip_loss(model, args.layer)
+            # print(time.time()-start_time)
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
