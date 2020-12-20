@@ -480,7 +480,7 @@ def train(train_loader, model, criterion, optimizer, epoch, ortho=False):
         # add orthogonal loss
         if ortho:
             # start_time = time.time()
-            loss += 0.0001*svfp.get_svip_loss(model, args.layer)
+            loss += 0.0001*svfp.get_svip_loss_with_target(model, args.layer)
             # print(time.time()-start_time)
 
         # compute gradient and do SGD step
