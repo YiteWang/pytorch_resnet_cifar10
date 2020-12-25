@@ -31,6 +31,7 @@ def get_sv(net, size_hook):
     iter_std = [] # normalized standard deviation by normalizing using the largest SV.
     iter_avg = []
     iter_svmax = [] # maximum singular value
+    iter_sv20 = [] # 50% singular value
     iter_sv50 = [] # 50% singular value
     iter_sv80 = [] # 80% singular value
     iter_kclip12 = [] # singular values larger than 1e-12
@@ -79,13 +80,14 @@ def get_sv(net, size_hook):
             iter_std.append(np.std(sorted_sv/sorted_sv.max()))
             iter_avg.append(np.mean(sorted_sv))
             iter_svmax.append(sorted_sv.max())
+            iter_sv20.append(sorted_sv[int(len(sorted_sv)*0.2)])
             iter_sv50.append(sorted_sv[int(len(sorted_sv)*0.5)])
             iter_sv80.append(sorted_sv[int(len(sorted_sv)*0.8)])
             iter_kclip12.append(sorted_sv_clip[0]/sorted_sv_clip[-1])
             iter_sv50p.append(sorted_sv_pos[int(len(sorted_sv_pos)*0.5)])
             iter_sv80p.append(sorted_sv_pos[int(len(sorted_sv_pos)*0.8)])
             iter_kavg.append(sorted_sv.max()/sorted_sv.mean())
-    return (np.array(iter_sv), np.array(iter_avg), np.array(iter_std), np.array(iter_svmax), 
+    return (np.array(iter_sv), np.array(iter_avg), np.array(iter_std), np.array(iter_svmax),  np.array(iter_sv20),
         np.array(iter_sv50), np.array(iter_sv80), np.array(iter_kclip12),
         np.array(iter_sv50p), np.array(iter_sv80p), np.array(iter_kavg)) 
 

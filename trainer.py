@@ -209,17 +209,19 @@ def main():
         training_sv_avg = []
         training_sv_std = []
         training_svmax = []
+        training_sv20 = [] # 50% singular value
         training_sv50 = [] # 50% singular value
         training_sv80 = [] # 80% singular value
         training_kclip12 = [] # singular values larger than 1e-12
         training_sv50p = [] # 50% non-zero singular value
         training_sv80p = [] # 80% non-zero singular value
         training_kavg = [] # max condition number/average condition number
-        sv, sv_avg, sv_std, svmax, sv50, sv80, kclip12, sv50p, sv80p, kavg = utils.get_sv(model, size_hook)
+        sv, sv_avg, sv_std, svmax, sv20, sv50, sv80, kclip12, sv50p, sv80p, kavg = utils.get_sv(model, size_hook)
         training_sv.append(sv)
         training_sv_avg.append(sv_avg)
         training_sv_std.append(sv_std)
         training_svmax.append(svmax)
+        training_sv20.append(sv20)
         training_sv50.append(sv50)
         training_sv80.append(sv80)
         training_kclip12.append(kclip12)
@@ -277,11 +279,12 @@ def main():
         # }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
 
         if args.compute_sv and epoch % args.save_every == 0:
-            sv, sv_avg, sv_std, svmax, sv50, sv80, kclip12, sv50p, sv80p, kavg = utils.get_sv(model, size_hook)
+            sv, sv_avg, sv_std, svmax, sv20, sv50, sv80, kclip12, sv50p, sv80p, kavg = utils.get_sv(model, size_hook)
             training_sv.append(sv)
             training_sv_avg.append(sv_avg)
             training_sv_std.append(sv_std)
             training_svmax.append(svmax)
+            training_sv20.append(sv20)
             training_sv50.append(sv50)
             training_sv80.append(sv80)
             training_kclip12.append(kclip12)
@@ -292,6 +295,7 @@ def main():
             np.save(os.path.join(args.save_dir, 'sv_avg.npy'), training_sv_avg)
             np.save(os.path.join(args.save_dir, 'sv_std.npy'), training_sv_std)
             np.save(os.path.join(args.save_dir, 'sv_svmax.npy'), training_svmax)
+            np.save(os.path.join(args.save_dir, 'sv_sv20.npy'), training_sv20)
             np.save(os.path.join(args.save_dir, 'sv_sv50.npy'), training_sv50)
             np.save(os.path.join(args.save_dir, 'sv_sv80.npy'), training_sv80)
             np.save(os.path.join(args.save_dir, 'sv_kclip12.npy'), training_kclip12)
@@ -354,11 +358,12 @@ def main():
 
         # utils.save_sparsity(model, args.save_dir)
         if args.compute_sv:
-            sv, sv_avg, sv_std, svmax, sv50, sv80, kclip12, sv50p, sv80p, kavg = utils.get_sv(model, size_hook)
+            sv, sv_avg, sv_std, svmax, sv20, sv50, sv80, kclip12, sv50p, sv80p, kavg = utils.get_sv(model, size_hook)
             training_sv.append(sv)
             training_sv_avg.append(sv_avg)
             training_sv_std.append(sv_std)
             training_svmax.append(svmax)
+            training_sv20.append(sv20)
             training_sv50.append(sv50)
             training_sv80.append(sv80)
             training_kclip12.append(kclip12)
@@ -369,6 +374,7 @@ def main():
             np.save(os.path.join(args.save_dir, 'sv_avg.npy'), training_sv_avg)
             np.save(os.path.join(args.save_dir, 'sv_std.npy'), training_sv_std)
             np.save(os.path.join(args.save_dir, 'sv_svmax.npy'), training_svmax)
+            np.save(os.path.join(args.save_dir, 'sv_sv20.npy'), training_sv20)
             np.save(os.path.join(args.save_dir, 'sv_sv50.npy'), training_sv50)
             np.save(os.path.join(args.save_dir, 'sv_sv80.npy'), training_sv80)
             np.save(os.path.join(args.save_dir, 'sv_kclip12.npy'), training_kclip12)
@@ -426,11 +432,12 @@ def main():
         # }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
 
         if args.compute_sv and epoch % args.save_every == 0:
-            sv, sv_avg, sv_std, svmax, sv50, sv80, kclip12, sv50p, sv80p, kavg = utils.get_sv(model, size_hook)
+            sv, sv_avg, sv_std, svmax, sv20, sv50, sv80, kclip12, sv50p, sv80p, kavg = utils.get_sv(model, size_hook)
             training_sv.append(sv)
             training_sv_avg.append(sv_avg)
             training_sv_std.append(sv_std)
             training_svmax.append(svmax)
+            training_sv20.append(sv20)
             training_sv50.append(sv50)
             training_sv80.append(sv80)
             training_kclip12.append(kclip12)
@@ -441,6 +448,7 @@ def main():
             np.save(os.path.join(args.save_dir, 'sv_avg.npy'), training_sv_avg)
             np.save(os.path.join(args.save_dir, 'sv_std.npy'), training_sv_std)
             np.save(os.path.join(args.save_dir, 'sv_svmax.npy'), training_svmax)
+            np.save(os.path.join(args.save_dir, 'sv_sv20.npy'), training_sv20)
             np.save(os.path.join(args.save_dir, 'sv_sv50.npy'), training_sv50)
             np.save(os.path.join(args.save_dir, 'sv_sv80.npy'), training_sv80)
             np.save(os.path.join(args.save_dir, 'sv_kclip12.npy'), training_kclip12)
