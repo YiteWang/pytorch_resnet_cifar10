@@ -9,7 +9,7 @@ from snip import *
 def apply_fpt(args, nets, data_loader, num_classes, samples_per_class = 10):
     # apply mask
     for net in nets:
-        net.train()
+        net.eval()
         net.zero_grad()
         for layer in net.modules():
             add_mask_ones(layer)
@@ -46,6 +46,7 @@ def apply_fpt(args, nets, data_loader, num_classes, samples_per_class = 10):
     # zero out gradients of weights
     for net in nets:
         net.zero_grad()
+        net.train()
 
 
 def ftp_forward():
