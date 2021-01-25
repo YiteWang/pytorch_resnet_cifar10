@@ -86,6 +86,9 @@ parser.add_argument('--pre_epochs', type=int, default=0, help='Number of pretrai
 parser.add_argument('--s_name', type=str, default='saved_sparsity', help='saved_sparsity.')
 parser.add_argument('--s_value', type=float, default=1, help='given changing sparsity.')
 parser.add_argument("--layer",  nargs="*",  type=int,  default=[],)
+parser.add_argument('--structured', dest='structured', action='store_true', help='set structured masks')
+parser.add_argument('--reduce_ratio', type=float, default=1, help='compact masks into reduce_ratio x 100% number of channels.')
+parser.add_argument('--shuffle_ratio', type=float, default=0.1, help='shuffle ratio of structured pruning.')
 best_prec1 = 0
 
 
@@ -146,9 +149,9 @@ def main():
         _, val_loader = load.dataloader(args.dataset, 128, False, args.workers)
 
     elif args.dataset == 'tiny-imagenet':
-        args.batch_size = 256
-        args.lr = 0.2
-        args.epochs = 200
+        args.batch_size = 128
+        args.lr = 0.01
+        args.epochs = 100
         print('Loading {} dataset.'.format(args.dataset))
         input_shape, num_classes = load.dimension(args.dataset) 
         train_dataset, train_loader = load.dataloader(args.dataset, args.batch_size, True, args.workers)
@@ -179,10 +182,14 @@ def main():
         model = load.model(args.arch, 'lottery')(input_shape, 
                                              num_classes,
                                              dense_classifier = True).cuda()
-    elif args.arch == 'vgg16full' or args.arch == 'vgg16full-bn':
+    elif args.arch in ['vgg16full', 'vgg16full-bn', 'vgg11full', 'vgg11full-bn'] :
+        if args.dataset == 'tiny-imagenet':
+            modeltype = 'tinyimagenet'
+        else:
+            modeltype = 'lottery'
         # Using resnet110 from Apollo
         # model = apolo_resnet.ResNet(110, num_classes=num_classes)
-        model = load.model(args.arch, 'lottery')(input_shape, 
+        model = load.model(args.arch, modeltype)(input_shape, 
                                              num_classes,
                                              dense_classifier = True).cuda()
         # Using resnet18 from torchvision
@@ -191,11 +198,11 @@ def main():
         # model.cuda()
         # utils.kaiming_initialize(model)
     
-    for layer in model.modules():
-        if isinstance(layer, nn.Linear):
-            init.orthogonal_(layer.weight.data)
-        elif isinstance(layer, (nn.Conv2d, nn.ConvTranspose2d)):
-            special_init.DeltaOrthogonal_init(layer.weight.data)
+    # for layer in model.modules():
+    #     if isinstance(layer, nn.Linear):
+    #         init.orthogonal_(layer.weight.data)
+    #     elif isinstance(layer, (nn.Conv2d, nn.ConvTranspose2d)):
+    #         special_init.DeltaOrthogonal_init(layer.weight.data)
 
     print('Number of parameters of model: {}.'.format(count_parameters(model)))
     # define loss function (criterion) and optimizer
@@ -207,28 +214,28 @@ def main():
         utils.run_once(train_loader, model)
         utils.detach_hook([size_hook])
         training_sv = []
-        training_sv_avg = []
-        training_sv_std = []
+        # training_sv_avg = []
+        # training_sv_std = []
         training_svmax = []
         training_sv20 = [] # 50% singular value
         training_sv50 = [] # 50% singular value
         training_sv80 = [] # 80% singular value
-        training_kclip12 = [] # singular values larger than 1e-12
+        # training_kclip12 = [] # singular values larger than 1e-12
         training_sv50p = [] # 50% non-zero singular value
         training_sv80p = [] # 80% non-zero singular value
-        training_kavg = [] # max condition number/average condition number
-        sv, sv_avg, sv_std, svmax, sv20, sv50, sv80, kclip12, sv50p, sv80p, kavg = utils.get_sv(model, size_hook)
+        # training_kavg = [] # max condition number/average condition number
+        sv, svmax, sv20, sv50, sv80,  sv50p, sv80p = utils.get_sv(model, size_hook)
         training_sv.append(sv)
-        training_sv_avg.append(sv_avg)
-        training_sv_std.append(sv_std)
+        # training_sv_avg.append(sv_avg)
+        # training_sv_std.append(sv_std)
         training_svmax.append(svmax)
         training_sv20.append(sv20)
         training_sv50.append(sv50)
         training_sv80.append(sv80)
-        training_kclip12.append(kclip12)
+        # training_kclip12.append(kclip12)
         training_sv50p.append(sv50p)
         training_sv80p.append(sv80p)
-        training_kavg.append(kavg)
+        # training_kavg.append(kavg)
             
     if args.half:
         model.half()
@@ -240,7 +247,8 @@ def main():
                                 weight_decay=args.weight_decay)
     if args.dataset ==  'tiny-imagenet':
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
-                                                        milestones=[100, 150], last_epoch=args.start_epoch - 1)
+                                                        # milestones=[100, 150], last_epoch=args.start_epoch - 1)
+                                                        milestones=[30, 60, 80], last_epoch=args.start_epoch - 1)
     elif args.dataset ==  'cifar100':
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
                                                         milestones=[60, 120], gamma = 0.2, last_epoch=args.start_epoch - 1)
@@ -280,29 +288,29 @@ def main():
         # }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
 
         if args.compute_sv and epoch % args.save_every == 0:
-            sv, sv_avg, sv_std, svmax, sv20, sv50, sv80, kclip12, sv50p, sv80p, kavg = utils.get_sv(model, size_hook)
+            sv,  svmax, sv20, sv50, sv80, sv50p, sv80p= utils.get_sv(model, size_hook)
             training_sv.append(sv)
-            training_sv_avg.append(sv_avg)
-            training_sv_std.append(sv_std)
+            # training_sv_avg.append(sv_avg)
+            # training_sv_std.append(sv_std)
             training_svmax.append(svmax)
             training_sv20.append(sv20)
             training_sv50.append(sv50)
             training_sv80.append(sv80)
-            training_kclip12.append(kclip12)
+            # training_kclip12.append(kclip12)
             training_sv50p.append(sv50p)
             training_sv80p.append(sv80p)
-            training_kavg.append(kavg)
+            # training_kavg.append(kavg)
             np.save(os.path.join(args.save_dir, 'sv.npy'), training_sv)
-            np.save(os.path.join(args.save_dir, 'sv_avg.npy'), training_sv_avg)
-            np.save(os.path.join(args.save_dir, 'sv_std.npy'), training_sv_std)
+            # np.save(os.path.join(args.save_dir, 'sv_avg.npy'), training_sv_avg)
+            # np.save(os.path.join(args.save_dir, 'sv_std.npy'), training_sv_std)
             np.save(os.path.join(args.save_dir, 'sv_svmax.npy'), training_svmax)
             np.save(os.path.join(args.save_dir, 'sv_sv20.npy'), training_sv20)
             np.save(os.path.join(args.save_dir, 'sv_sv50.npy'), training_sv50)
             np.save(os.path.join(args.save_dir, 'sv_sv80.npy'), training_sv80)
-            np.save(os.path.join(args.save_dir, 'sv_kclip12.npy'), training_kclip12)
+            # np.save(os.path.join(args.save_dir, 'sv_kclip12.npy'), training_kclip12)
             np.save(os.path.join(args.save_dir, 'sv_sv50p.npy'), training_sv50p)
             np.save(os.path.join(args.save_dir, 'sv_sv80p.npy'), training_sv80p)
-            np.save(os.path.join(args.save_dir, 'sv_kavg.npy'), training_kavg)
+            # np.save(os.path.join(args.save_dir, 'sv_kavg.npy'), training_kavg)
 
     print('[*] {} pre-training epochs done'.format(args.pre_epochs))
 
@@ -320,11 +328,11 @@ def main():
             for layer in model.modules():
                 snip.add_mask_ones(layer)
             # svfp.svip_reinit(model)
-            if args.compute_sv:
-                sv, sv_avg, sv_std = utils.get_sv(model, size_hook)
-                training_sv.append(sv)
-                training_sv_avg.append(sv_avg)
-                training_sv_std.append(sv_std)
+            # if args.compute_sv:
+            #     sv, sv_avg, sv_std = utils.get_sv(model, size_hook)
+            #     training_sv.append(sv)
+            #     training_sv_avg.append(sv_avg)
+            #     training_sv_std.append(sv_std)
             utils.save_sparsity(model, args.save_dir)
             save_checkpoint({
                 'state_dict': model.state_dict(),
@@ -337,8 +345,18 @@ def main():
             # model.load_state_dict(checkpoint['state_dict'])
             # svip.apply_svip(args, nets)
             # svfp.apply_svip(args, nets)
-            given_sparsity = np.load('saved_sparsity.npy')
-            svfp.apply_svip_givensparsity(args, nets, given_sparsity)
+            # given_sparsity = np.load('saved_sparsity.npy')
+            # svfp.apply_svip_givensparsity(args, nets, given_sparsity)
+            num_apply_layer = utils.get_apply_layer(model)
+            given_sparsity = np.ones(num_apply_layer,)
+            # given_sparsity[-4] = args.s_value
+            # given_sparsity[-5] = args.s_value
+            for layer in args.layer:
+                given_sparsity[layer] = args.s_value
+            print(given_sparsity)
+            # given_sparsity = np.load(args.s_name+'.npy')
+            # snip.apply_rand_prune_givensparsity(nets, given_sparsity)
+            ftprune.apply_specprune(nets, given_sparsity)
         elif args.prune_method == 'RAND':
             # utils.save_sparsity(model, args.save_dir)
             # checkpoint = torch.load('preprune.th')
@@ -353,7 +371,9 @@ def main():
                 given_sparsity[layer] = args.s_value
             print(given_sparsity)
             # given_sparsity = np.load(args.s_name+'.npy')
-            snip.apply_rand_prune_givensparsity(nets, given_sparsity)
+            # snip.apply_rand_prune_givensparsity(nets, given_sparsity)
+            svfp.apply_rand_prune_givensparsity_var(nets, given_sparsity, args.reduce_ratio, args.structured, args)
+            # svfp.svip_reinit_givenlayer(nets, args.layer)
         elif args.prune_method == 'Delta':
             snip.apply_prune_active(nets)
         elif args.prune_method == 'FTP':
@@ -361,29 +381,29 @@ def main():
 
         # utils.save_sparsity(model, args.save_dir)
         if args.compute_sv:
-            sv, sv_avg, sv_std, svmax, sv20, sv50, sv80, kclip12, sv50p, sv80p, kavg = utils.get_sv(model, size_hook)
+            sv, svmax, sv20, sv50, sv80, sv50p, sv80p = utils.get_sv(model, size_hook)
             training_sv.append(sv)
-            training_sv_avg.append(sv_avg)
-            training_sv_std.append(sv_std)
+            # training_sv_avg.append(sv_avg)
+            # training_sv_std.append(sv_std)
             training_svmax.append(svmax)
             training_sv20.append(sv20)
             training_sv50.append(sv50)
             training_sv80.append(sv80)
-            training_kclip12.append(kclip12)
+            # training_kclip12.append(kclip12)
             training_sv50p.append(sv50p)
             training_sv80p.append(sv80p)
-            training_kavg.append(kavg)
+            # training_kavg.append(kavg)
             np.save(os.path.join(args.save_dir, 'sv.npy'), training_sv)
-            np.save(os.path.join(args.save_dir, 'sv_avg.npy'), training_sv_avg)
-            np.save(os.path.join(args.save_dir, 'sv_std.npy'), training_sv_std)
+            # np.save(os.path.join(args.save_dir, 'sv_avg.npy'), training_sv_avg)
+            # np.save(os.path.join(args.save_dir, 'sv_std.npy'), training_sv_std)
             np.save(os.path.join(args.save_dir, 'sv_svmax.npy'), training_svmax)
             np.save(os.path.join(args.save_dir, 'sv_sv20.npy'), training_sv20)
             np.save(os.path.join(args.save_dir, 'sv_sv50.npy'), training_sv50)
             np.save(os.path.join(args.save_dir, 'sv_sv80.npy'), training_sv80)
-            np.save(os.path.join(args.save_dir, 'sv_kclip12.npy'), training_kclip12)
+            # np.save(os.path.join(args.save_dir, 'sv_kclip12.npy'), training_kclip12)
             np.save(os.path.join(args.save_dir, 'sv_sv50p.npy'), training_sv50p)
             np.save(os.path.join(args.save_dir, 'sv_sv80p.npy'), training_sv80p)
-            np.save(os.path.join(args.save_dir, 'sv_kavg.npy'), training_kavg)
+            # np.save(os.path.join(args.save_dir, 'sv_kavg.npy'), training_kavg)
 
         print('[*] Sparsity after pruning: ', utils.check_sparsity(model))
 
@@ -435,29 +455,29 @@ def main():
         # }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
 
         if args.compute_sv and epoch % args.save_every == 0:
-            sv, sv_avg, sv_std, svmax, sv20, sv50, sv80, kclip12, sv50p, sv80p, kavg = utils.get_sv(model, size_hook)
+            sv,  svmax, sv20, sv50, sv80,  sv50p, sv80p = utils.get_sv(model, size_hook)
             training_sv.append(sv)
-            training_sv_avg.append(sv_avg)
-            training_sv_std.append(sv_std)
+            # training_sv_avg.append(sv_avg)
+            # training_sv_std.append(sv_std)
             training_svmax.append(svmax)
             training_sv20.append(sv20)
             training_sv50.append(sv50)
             training_sv80.append(sv80)
-            training_kclip12.append(kclip12)
+            # training_kclip12.append(kclip12)
             training_sv50p.append(sv50p)
             training_sv80p.append(sv80p)
-            training_kavg.append(kavg)
+            # training_kavg.append(kavg)
             np.save(os.path.join(args.save_dir, 'sv.npy'), training_sv)
-            np.save(os.path.join(args.save_dir, 'sv_avg.npy'), training_sv_avg)
-            np.save(os.path.join(args.save_dir, 'sv_std.npy'), training_sv_std)
+            # np.save(os.path.join(args.save_dir, 'sv_avg.npy'), training_sv_avg)
+            # np.save(os.path.join(args.save_dir, 'sv_std.npy'), training_sv_std)
             np.save(os.path.join(args.save_dir, 'sv_svmax.npy'), training_svmax)
             np.save(os.path.join(args.save_dir, 'sv_sv20.npy'), training_sv20)
             np.save(os.path.join(args.save_dir, 'sv_sv50.npy'), training_sv50)
             np.save(os.path.join(args.save_dir, 'sv_sv80.npy'), training_sv80)
-            np.save(os.path.join(args.save_dir, 'sv_kclip12.npy'), training_kclip12)
+            # np.save(os.path.join(args.save_dir, 'sv_kclip12.npy'), training_kclip12)
             np.save(os.path.join(args.save_dir, 'sv_sv50p.npy'), training_sv50p)
             np.save(os.path.join(args.save_dir, 'sv_sv80p.npy'), training_sv80p)
-            np.save(os.path.join(args.save_dir, 'sv_kavg.npy'), training_kavg)
+            # np.save(os.path.join(args.save_dir, 'sv_kavg.npy'), training_kavg)
 
 
 def train(train_loader, model, criterion, optimizer, epoch, ortho=False):

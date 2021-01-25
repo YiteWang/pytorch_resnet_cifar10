@@ -11,6 +11,8 @@ from Models import imagenet_vgg
 from Models import imagenet_resnet
 from Models import lottery_resnet_full
 from Models import lottery_vgg_full
+from Models import tinyimagenet_vgg_full
+from Models import imagenet_vgg_full
 # from Pruners import pruners
 from Utils import custom_datasets
 
@@ -34,8 +36,8 @@ def dimension(dataset):
 def get_transform(size, padding, mean, std, preprocess):
     transform = []
     if preprocess:
-        # transform.append(transforms.RandomResizedCrop(size=size, scale=(0.1, 1.0), ratio=(0.8, 1.25)))
-        transform.append(transforms.RandomCrop(size=size, padding=padding))
+        transform.append(transforms.RandomResizedCrop(size=size, scale=(0.1, 1.0), ratio=(0.8, 1.25)))
+        # transform.append(transforms.RandomCrop(size=size, padding=padding))
         transform.append(transforms.RandomHorizontalFlip())
     transform.append(transforms.ToTensor())
     transform.append(transforms.Normalize(mean, std))
@@ -101,6 +103,8 @@ def model(model_architecture, model_class):
     lottery_models = {
         'vgg11' : lottery_vgg.vgg11,
         'vgg11-bn' : lottery_vgg.vgg11_bn,
+        'vgg11full' : lottery_vgg_full.vgg11,
+        'vgg11full-bn' : lottery_vgg_full.vgg11_bn,
         'vgg13' : lottery_vgg.vgg13,
         'vgg13-bn' : lottery_vgg.vgg13_bn,
         'vgg16' : lottery_vgg.vgg16,
@@ -130,6 +134,7 @@ def model(model_architecture, model_class):
         'vgg13-bn' : tinyimagenet_vgg.vgg13_bn,
         'vgg16' : tinyimagenet_vgg.vgg16,
         'vgg16-bn' : tinyimagenet_vgg.vgg16_bn,
+        'vgg16full-bn' : tinyimagenet_vgg_full.vgg16_bn,
         'vgg19' : tinyimagenet_vgg.vgg19,
         'vgg19-bn' : tinyimagenet_vgg.vgg19_bn,
         'resnet18' : tinyimagenet_resnet.resnet18,

@@ -152,7 +152,7 @@ def apply_rand_prune_givensparsity(nets, sparsity):
         for net in nets:
             for layer in net.modules():
                 if isinstance(layer, (nn.Linear, nn.Conv2d, nn.ConvTranspose2d)):
-                    if sparsity[applied_layer] != 0:
+                    if sparsity[applied_layer] != 1:
                         add_mask_rand(layer, sparsity[applied_layer])
                     else:
                         add_mask_ones(layer)
@@ -179,7 +179,7 @@ def add_mask_current_active(layer):
                 layer.weight.data = layer.weight_mask * layer.weight
             modify_mask_forward(layer)
 
-def add_mask_rand(layer, sparse_lvl):
+def add_mask_rand(layer, sparse_lvl, modify_weight=True, structured=False):
     # It means such layers are using spectral_norm layers
     with torch.no_grad():
         if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
@@ -188,14 +188,22 @@ def add_mask_rand(layer, sparse_lvl):
                 weight_num = layer.weight_orig.nelement()
                 weight_mask_temp = torch.zeros(weight_num, device=layer.weight_orig.device)
                 weight_mask_temp[:int(weight_num*sparse_lvl)] = 1
-                layer.weight_mask = weight_mask_temp[torch.randperm(weight_num)].view(layer.weight_orig.size())
-                layer.weight_orig.data = layer.weight_mask * layer.weight_orig.data
+                if not structured:
+                    layer.weight_mask = weight_mask_temp[torch.randperm(weight_num)].view(layer.weight_orig.size())
+                else:
+                    layer.weight_mask = weight_mask_temp.view(layer.weight_orig.size())
+                if modify_weight:
+                    layer.weight_orig.data = layer.weight_mask * layer.weight_orig.data
             else:
                 weight_num = layer.weight.nelement()
                 weight_mask_temp = torch.zeros(weight_num, device=layer.weight.device)
                 weight_mask_temp[:int(weight_num*sparse_lvl)] = 1
-                layer.weight_mask = weight_mask_temp[torch.randperm(weight_num)].view(layer.weight.size())
-                layer.weight.data = layer.weight_mask * layer.weight
+                if not structured:
+                    layer.weight_mask = weight_mask_temp[torch.randperm(weight_num)].view(layer.weight.size())
+                else:
+                    layer.weight_mask = weight_mask_temp.view(layer.weight.size())
+                if modify_weight:
+                    layer.weight.data = layer.weight_mask * layer.weight
             modify_mask_forward(layer)
 
 
