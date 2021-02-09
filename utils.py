@@ -178,7 +178,7 @@ def check_layer_sparsity(network):
     sparsity = []
     for m in network.modules():
         if isinstance(m, (nn.Conv2d, nn.Linear, nn.ConvTranspose2d)):
-            sparsity.append((m.weight_mask.sum()/m.weight_mask.numel()).item())
+            sparsity.append(((m.weight!=0).float().sum()/m.weight.numel()).item())
     return np.array(sparsity)
 
 

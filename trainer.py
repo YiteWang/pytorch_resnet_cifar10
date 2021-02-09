@@ -89,6 +89,7 @@ parser.add_argument("--layer",  nargs="*",  type=int,  default=[],)
 parser.add_argument('--structured', dest='structured', action='store_true', help='set structured masks')
 parser.add_argument('--reduce_ratio', type=float, default=1, help='compact masks into reduce_ratio x 100% number of channels.')
 parser.add_argument('--shuffle_ratio', type=float, default=0.1, help='shuffle ratio of structured pruning.')
+parser.add_argument('--rescale', dest='rescale', action='store_true', help='rescale weight after pruning')
 best_prec1 = 0
 
 
@@ -371,8 +372,8 @@ def main():
                 given_sparsity[layer] = args.s_value
             print(given_sparsity)
             # given_sparsity = np.load(args.s_name+'.npy')
-            # snip.apply_rand_prune_givensparsity(nets, given_sparsity)
-            svfp.apply_rand_prune_givensparsity_var(nets, given_sparsity, args.reduce_ratio, args.structured, args)
+            snip.apply_rand_prune_givensparsity(nets, given_sparsity)
+            # svfp.apply_rand_prune_givensparsity_var(nets, given_sparsity, args.reduce_ratio, args.structured, args)
             # svfp.svip_reinit_givenlayer(nets, args.layer)
         elif args.prune_method == 'Delta':
             snip.apply_prune_active(nets)
@@ -381,6 +382,20 @@ def main():
 
         # utils.save_sparsity(model, args.save_dir)
         if args.compute_sv:
+            if args.rescale:
+                ###################################
+                _, svmax, _, _, _, _, _ = utils.get_sv(model, size_hook)
+                applied_layer = 0
+                for net in nets:
+                    for layer in net.modules():
+                        if isinstance(layer, (nn.Linear, nn.Conv2d, nn.ConvTranspose2d)):
+                            if given_sparsity[applied_layer] != 1:
+                                # add_mask_rand_basedonchannel(layer, sparsity[applied_layer], ratio, True, structured)
+                                with torch.no_grad():
+                                    layer.weight /= svmax[applied_layer]
+                            applied_layer += 1
+                ###################################
+
             sv, svmax, sv20, sv50, sv80, sv50p, sv80p = utils.get_sv(model, size_hook)
             training_sv.append(sv)
             # training_sv_avg.append(sv_avg)
@@ -538,6 +553,7 @@ def train(train_loader, model, criterion, optimizer, epoch, ortho=False):
                   'Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
                       epoch, i, len(train_loader), batch_time=batch_time,
                       data_time=data_time, loss=losses, top1=top1))
+    print('training accuracy: {:.3f}'.format(top1.avg))
 
 
 def validate(val_loader, model, criterion):

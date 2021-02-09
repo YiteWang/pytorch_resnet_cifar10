@@ -146,6 +146,7 @@ def specprune(layer, sparsity):
         layer.weight_mask = (layer.mask_param >= criterion).float().detach()
         layer.weight *= layer.weight_mask
     layer.mask_param = None
+    snip.modify_mask_forward(layer)
 
 def deconv_orth_dist_mod(layer, stride = 2):
     kernel = layer.weight
