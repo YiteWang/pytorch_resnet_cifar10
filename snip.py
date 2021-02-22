@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import types
 
+# code obtained from GraSP paper: https://github.com/alecwangcq/GraSP
 def GraSP_fetch_data(dataloader_iter, num_classes, samples_per_class):
     datas = [[] for _ in range(num_classes)]
     labels = [[] for _ in range(num_classes)]
@@ -77,8 +78,8 @@ def apply_snip(args, nets, data_loader, criterion, num_classes, samples_per_clas
     # data_iter = iter(snip_loader)
     data_iter = iter(data_loader)
     # Let the neural network run one forward pass to get connect sensitivity (CS)
-    for i in range(samples_per_class):
-        (input, target) = GraSP_fetch_data(data_iter, num_classes, 1)
+    for i in range(1):
+        (input, target) = GraSP_fetch_data(data_iter, num_classes, samples_per_class)
         # (input, target) = data_iter.next()
         target = target.cuda()
         input_var = input.cuda()

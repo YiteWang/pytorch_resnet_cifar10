@@ -69,7 +69,7 @@ parser.add_argument('--save-every', dest='save_every',
 parser.add_argument('--sv', dest='compute_sv', action='store_true',
                     help='compute_sv throughout training')
 # Following arguments are for pruning
-parser.add_argument('--prune_method', type=str, default='NONE', choices=['NONE', 'GRASP', 'RAND', 'SNIP', 'Delta', 'TEST', 'FTP'], help='Pruning methods.')
+parser.add_argument('--prune_method', type=str, default='NONE', choices=['NONE', 'GRASP', 'RAND', 'SNIP', 'Delta', 'TEST', 'FTP','NTK'], help='Pruning methods.')
 parser.add_argument('--prunesets_num', type=int, default=10, help='Number of datapoints for applying pruning methods.')
 parser.add_argument('--sparse_iter', type=float, default=0, help='Sparsity level of neural networks.')
 parser.add_argument('--sparse_lvl', type=float, default=1, help='Sparsity level of neural networks.')
@@ -379,7 +379,8 @@ def main():
             snip.apply_prune_active(nets)
         elif args.prune_method == 'FTP':
             ftprune.apply_fpt(args, nets, train_loader, num_classes=num_classes)
-
+        elif args.prune_method == 'NTK':
+            ntkprune.ntk_prune(args, nets, train_loader, num_classes=num_classes)
         # utils.save_sparsity(model, args.save_dir)
         if args.compute_sv:
             if args.rescale:
