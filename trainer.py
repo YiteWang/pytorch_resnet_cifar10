@@ -24,6 +24,7 @@ import special_init
 import torch.nn.init as init
 import time
 import ftprune
+import ntkprune
 
 model_names = sorted(name for name in resnet.__dict__
     if name.islower() and not name.startswith("__")

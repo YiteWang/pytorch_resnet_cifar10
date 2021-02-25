@@ -6,7 +6,7 @@ import types
 import snip
 
 # Code obtained by TENAS: https://github.com/VITA-Group/TENAS/blob/main/prune_tenas.py
-def get_ntk_n(xloader, networks, recalbn=0, train_mode=False, num_batch=-1, num_classes=num_classes, samples_per_class=samples_per_class):
+def get_ntk_n(xloader, networks, recalbn=0, train_mode=False, num_batch=-1, num_classes=10, samples_per_class=1):
     device = torch.cuda.current_device()
     # if recalbn > 0:
     #     network = recal_bn(network, xloader, recalbn, device)
@@ -19,10 +19,10 @@ def get_ntk_n(xloader, networks, recalbn=0, train_mode=False, num_batch=-1, num_
         else:
             network.eval()
     ######
-    data_iter = iter(data_loader)
+    data_iter = iter(xloader)
     grads = [[] for _ in range(len(networks))]
     for i in range(num_batch):
-        inputs = snip.GraSP_fetch_data(data_iter, num_classes, samples_per_class).cuda(device=device, non_blocking=True)
+        inputs = snip.GraSP_fetch_data(data_iter, num_classes, samples_per_class)[0].cuda(device=device, non_blocking=True)
         for net_idx, network in enumerate(networks):
             network.zero_grad()
             inputs_ = inputs.clone().cuda(device=device, non_blocking=True)
@@ -54,7 +54,7 @@ def ntk_prune(args, nets, data_loader, num_classes, samples_per_class = 1):
         net.train()
         net.zero_grad()
         for layer in net.modules():
-            add_mask_ones(layer)
+            snip.add_mask_ones(layer)
     model = nets[0]
     # data_iter = iter(snip_loader)
     ntk = get_ntk_n(data_loader, [model], train_mode = True, num_batch=1, num_classes=num_classes, samples_per_class=samples_per_class)
