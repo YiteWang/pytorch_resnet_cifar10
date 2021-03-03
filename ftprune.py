@@ -100,7 +100,7 @@ def net_prune_fpt(net, sparse_lvl):
             if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
                 # Stop calculating gradients of masks
                 layer.weight_mask.data = modified_mask[layer]
-                layer.weight_mask.requires_grad = False
+                # layer.weight_mask.requires_grad = False
 
                 # Set those pruned weight as 0 as well, Here needs to address spectral_norm layer
                 if hasattr(layer, 'weight_orig'): 

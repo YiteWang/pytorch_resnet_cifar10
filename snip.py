@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import types
+import utils
 
 # code obtained from GraSP paper: https://github.com/alecwangcq/GraSP
 def GraSP_fetch_data(dataloader_iter, num_classes, samples_per_class):
@@ -78,8 +79,8 @@ def apply_snip(args, nets, data_loader, criterion, num_classes, samples_per_clas
     # data_iter = iter(snip_loader)
     data_iter = iter(data_loader)
     # Let the neural network run one forward pass to get connect sensitivity (CS)
-    for i in range(1):
-        (input, target) = GraSP_fetch_data(data_iter, num_classes, samples_per_class)
+    for i in range(samples_per_class):
+        (input, target) = GraSP_fetch_data(data_iter, num_classes, 1)
         # (input, target) = data_iter.next()
         target = target.cuda()
         input_var = input.cuda()
@@ -97,6 +98,64 @@ def apply_snip(args, nets, data_loader, criterion, num_classes, samples_per_clas
         net_prune_snip(net, args.sparse_lvl)
 
     print('[*] SNIP pruning done!')
+
+def update_criterion(net):
+    with torch.no_grad():
+        for layer in net.modules():
+            if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
+                layer.criterion += torch.abs(layer.weight_mask.grad)
+
+# Apply SNIP pruning methods
+def apply_advsnip(args, nets, data_loader, criterion, num_classes, samples_per_class = 10):
+    
+    # first add masks to each layer of nets
+    for net in nets:
+        net.train()
+        net.zero_grad()
+        for layer in net.modules():
+            add_mask_ones(layer)  
+            add_criterion(layer)
+    model = nets[0]
+    # data_iter = iter(snip_loader)
+    if args.iter_prune:
+        num_iter = 10
+    else:
+        num_iter = 1 
+    # Let the neural network run one forward pass to get connect sensitivity (CS)
+    for i in range(num_iter):
+        data_iter = iter(data_loader)
+        for _ in range(10): # number of iterations for taking expectation
+            utils.kaiming_initialize(model)
+            for i in range(1):
+                (input, target) = GraSP_fetch_data(data_iter, num_classes, samples_per_class)
+                # (input, target) = data_iter.next()
+                target = target.cuda()
+                input_var = input.cuda()
+                target_var = target
+                if args.half:
+                    input_var = input_var.half()
+                # compute output
+                output = model(input_var)
+                loss = criterion(output, target_var)
+                loss.backward()
+
+            # Summing the weight mask absolute gradient
+            update_criterion(model)
+            # Zero out gradient of weight mask
+            weight_mask_grad_zero(model)
+
+        # prune the network using CS
+        for net in nets:
+            net_prune_advsnip(net, args.sparse_lvl**((i+1)/num_iter))
+
+    print('[*] SNIP pruning done!')
+
+# zero out gradient of weight mask
+def weight_mask_grad_zero(net):
+    with torch.no_grad():
+        for layer in net.modules():
+            if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
+                layer.weight_mask.grad = None
 
 # Prune network based on gradient absolute values
 def net_prune_snip(net, sparse_lvl):
@@ -134,6 +193,42 @@ def net_prune_snip(net, sparse_lvl):
                 else:
                     layer.weight *= layer.weight_mask
 
+# Prune network based on criterion
+def net_prune_advsnip(net, sparse_lvl):
+    grad_mask = {}
+    for layer in net.modules():
+        if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
+            grad_mask[layer]=torch.abs(layer.criterion*layer.weight_mask)
+
+    # find top sparse_lvl number of elements
+    grad_mask_flattened = torch.cat([torch.flatten(a) for a in grad_mask.values()])
+    grad_mask_sum = torch.sum(grad_mask_flattened)
+    # grad_mask_sum = 1
+    grad_mask_flattened /= grad_mask_sum
+
+    left_params_num = int (len(grad_mask_flattened) * sparse_lvl)
+    grad_mask_topk, _ = torch.topk(grad_mask_flattened, left_params_num)
+    threshold = grad_mask_topk[-1]
+    modified_mask = {}
+    for layer, mask in grad_mask.items():
+        modified_mask[layer] = ((mask/grad_mask_sum)>=threshold).float()
+        a = modified_mask[layer]
+        print(((a!=0).float().sum()/a.numel()))
+    print('-'*20)
+
+    with torch.no_grad():
+        for layer in net.modules():          
+            if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
+                # Stop calculating gradients of masks
+                layer.weight_mask.data = modified_mask[layer]
+                # layer.weight_mask.requires_grad = False
+
+                # Set those pruned weight as 0 as well, Here needs to address spectral_norm layer
+                if hasattr(layer, 'weight_orig'): 
+                    layer.weight_orig *= layer.weight_mask
+                else:
+                    layer.weight *= layer.weight_mask
+                layer.criterion = torch.zeros(layer.criterion.size(), device = layer.criterion.device)
 
 # RANDOM PRUNING METHODS
 def apply_rand_prune(nets, sparse_lvl, only_G=False):
@@ -217,6 +312,15 @@ def add_mask_ones(layer):
             else:
                 layer.weight_mask = torch.ones_like(layer.weight, requires_grad = True, device=layer.weight.device)
             modify_mask_forward(layer)
+
+def add_criterion(layer):
+    with torch.no_grad():
+        if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
+            # Handling spectral_norm layer
+            if hasattr(layer, 'weight_orig'): 
+                layer.criterion = torch.zeros(layer.weight_orig.size(), device=layer.weight_orig.device)
+            else:
+                layer.criterion = torch.zeros(layer.weight.size(), device=layer.weight.device)
 
 def activate_weight_mask(layer):
     with torch.no_grad():

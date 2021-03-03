@@ -91,6 +91,7 @@ parser.add_argument('--structured', dest='structured', action='store_true', help
 parser.add_argument('--reduce_ratio', type=float, default=1, help='compact masks into reduce_ratio x 100% number of channels.')
 parser.add_argument('--shuffle_ratio', type=float, default=0.1, help='shuffle ratio of structured pruning.')
 parser.add_argument('--rescale', dest='rescale', action='store_true', help='rescale weight after pruning')
+parser.add_argument('--adv', dest='adv', action='store_true', help='If using adversarial trick')
 best_prec1 = 0
 
 
@@ -340,7 +341,10 @@ def main():
                 'state_dict': model.state_dict(),
                 'best_prec1': 0,
             }, 0, filename=os.path.join(args.save_dir, 'preprune.th'))
-            snip.apply_snip(args, nets, train_loader, criterion, num_classes=num_classes)
+            if args.adv:
+                snip.apply_advsnip(args, nets, train_loader, criterion, num_classes=num_classes)
+            else:
+                snip.apply_snip(args, nets, train_loader, criterion, num_classes=num_classes)
             # snip.apply_snip(args, nets, snip_loader, criterion)
         elif args.prune_method == 'TEST':
             # checkpoint = torch.load('preprune.th')
@@ -381,7 +385,12 @@ def main():
         elif args.prune_method == 'FTP':
             ftprune.apply_fpt(args, nets, train_loader, num_classes=num_classes)
         elif args.prune_method == 'NTK':
-            ntkprune.ntk_prune(args, nets, train_loader, num_classes=num_classes)
+            _, ntk_loader = load.dataloader(args.dataset, 10, True, args.workers)
+            if args.adv:
+                ntkprune.ntk_prune_adv(args, nets, ntk_loader, num_classes=num_classes)
+            else:
+                ntkprune.ntk_prune(args, nets, ntk_loader, num_classes=num_classes)
+
         # utils.save_sparsity(model, args.save_dir)
         if args.compute_sv:
             if args.rescale:
@@ -435,7 +444,7 @@ def main():
                                 weight_decay=args.weight_decay)
     if args.dataset ==  'tiny-imagenet':
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
-                                                        milestones=[100, 150], last_epoch=args.start_epoch - 1)
+                                                        milestones=[30, 60, 80], last_epoch=args.start_epoch - 1)
     elif args.dataset ==  'cifar100':
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
                                                         milestones=[60, 120], gamma = 0.2, last_epoch=args.start_epoch - 1)
