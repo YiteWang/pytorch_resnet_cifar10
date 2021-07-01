@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import types
 import utils
+from svfp import get_svip_loss
 
 # code obtained from GraSP paper: https://github.com/alecwangcq/GraSP
 def GraSP_fetch_data(dataloader_iter, num_classes, samples_per_class):
@@ -67,7 +68,74 @@ def mask_ConvTranspose2d(self, x, output_size = None):
                 output_padding, self.groups, self.dilation)
 
 # Apply SNIP pruning methods
-def apply_snip(args, nets, data_loader, criterion, num_classes, samples_per_class = 10):
+def apply_snip(args, nets, data_loader, criterion, num_classes, samples_per_class = 10, num_iter = 1):
+    
+    # first add masks to each layer of nets
+    for net in nets:
+        net.train()
+        net.zero_grad()
+        for layer in net.modules():
+            add_mask_ones(layer)
+    model = nets[0]
+    # data_iter = iter(snip_loader)
+    if not args.iter_prune:
+        data_iter = iter(data_loader)
+        print('[*] Using single-shot SNIP.')
+        # Let the neural network run one forward pass to get connect sensitivity (CS)
+        for i in range(num_iter):
+            try:
+                (input, target) = GraSP_fetch_data(data_iter, num_classes, samples_per_class)
+            except:
+                data_iter = iter(dataloader)
+                (input, target) = GraSP_fetch_data(data_iter, num_classes, samples_per_class)
+            # (input, target) = data_iter.next()
+            target = target.cuda()
+            input_var = input.cuda()
+            target_var = target
+            if args.half:
+                input_var = input_var.half()
+            # compute output
+            output = model(input_var)
+            loss = criterion(output, target_var)
+            loss.backward()
+        
+        # prune the network using CS
+        for net in nets:
+            # net_prune_snip(net, args.sparse_lvl)
+            net_prune_snip(net, args.sparse_lvl)
+
+        # print('[*] SNIP pruning done!')
+        print('[*] SNIP weight pruning done!')
+
+    else:
+        print('[*] Using iterative SNIP.')
+        num_iter = 10
+        data_iter = iter(data_loader)
+        for i in range(num_iter):
+            try:
+                (input, target) = GraSP_fetch_data(data_iter, num_classes, samples_per_class)
+            except:
+                data_iter = iter(dataloader)
+                (input, target) = GraSP_fetch_data(data_iter, num_classes, samples_per_class)
+            # (input, target) = data_iter.next()
+            target = target.cuda()
+            input_var = input.cuda()
+            target_var = target
+            if args.half:
+                input_var = input_var.half()
+            # compute output
+            output = model(input_var)
+            loss = criterion(output, target_var)
+            if args.ep_coe!=0:
+                loss += args.ep_coe * get_ep(model)
+            loss.backward()
+            # prune the network using CS
+            for net in nets:
+                net_iterative_prune(net, args.sparse_lvl**((i+1)/num_iter))
+        print('[*] Iterative SNIP pruning done!')
+
+# Apply GraSP pruning methods
+def apply_grasp(args, nets, data_loader, criterion, num_classes, samples_per_class = 10, num_iter=1, grasp_temp=200):
     
     # first add masks to each layer of nets
     for net in nets:
@@ -78,32 +146,151 @@ def apply_snip(args, nets, data_loader, criterion, num_classes, samples_per_clas
     model = nets[0]
     # data_iter = iter(snip_loader)
     data_iter = iter(data_loader)
+    print('[*] Using single-shot GraSP.')
+    # First gather weights
+    weights = []
+    for layer in model.modules():
+        if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
+            weights.append(layer.weight)
+    # The gradient that will stop computing gradients
+    stopped_grads = 0
     # Let the neural network run one forward pass to get connect sensitivity (CS)
-    for i in range(samples_per_class):
-        (input, target) = GraSP_fetch_data(data_iter, num_classes, 1)
+    for i in range(num_iter):
+        try:
+            (input, target) = GraSP_fetch_data(data_iter, num_classes, samples_per_class)
+        except:
+            data_iter = iter(dataloader)
+            (input, target) = GraSP_fetch_data(data_iter, num_classes, samples_per_class)
+        
         # (input, target) = data_iter.next()
         target = target.cuda()
         input_var = input.cuda()
         target_var = target
         if args.half:
             input_var = input_var.half()
+        
         # compute output
-        output = model(input_var)
+        output = model(input_var)/grasp_temp
         loss = criterion(output, target_var)
-        loss.backward()
-
+        grads = torch.autograd.grad(loss, weights, create_graph=False)
+        flattened_grads = torch.cat([g.reshape(-1) for g in grads if g is not None])
+        stopped_grads += flattened_grads
     
+    # Second time computing gradients
+    for i in range(num_iter):
+        try:
+            (input, target) = GraSP_fetch_data(data_iter, num_classes, samples_per_class)
+        except:
+            data_iter = iter(dataloader)
+            (input, target) = GraSP_fetch_data(data_iter, num_classes, samples_per_class)
+        
+        # (input, target) = data_iter.next()
+        target = target.cuda()
+        input_var = input.cuda()
+        target_var = target
+        if args.half:
+            input_var = input_var.half()
+        
+        # compute output
+        output = model(input_var)/grasp_temp
+        loss = criterion(output, target_var)
+        grads = torch.autograd.grad(loss, weights, create_graph=True)
+        flattened_grads = torch.cat([g.reshape(-1) for g in grads if g is not None])
+        
+        gnorm = (stopped_grads * flattened_grads).sum()
+        gnorm.backward()
+
     # prune the network using CS
     for net in nets:
-        net_prune_snip(net, args.sparse_lvl)
+        net_prune_grasp(net, args.sparse_lvl)
 
-    print('[*] SNIP pruning done!')
+    print('[*] GraSP weight pruning done!')
+
+
+def apply_mag_prune(args, model):
+    
+    # first add masks to each layer of nets
+    for layer in model.modules():
+        add_mask_ones(layer)
+    net_prune_magnitude(model, args.sparse_lvl)
+    print('[*] Magnitude pruning done!')
+
+# Apply orthoSNIP pruning methods
+def apply_orthosnip(args, nets, data_loader, criterion, num_classes, samples_per_class = 10):
+    ortho_importance = args.ortho_importance
+    print('[*] Using ortho_importance: {}'.format(ortho_importance))
+    # first add masks to each layer of nets
+    for net in nets:
+        net.train()
+        net.zero_grad()
+        for layer in net.modules():
+            add_mask_ones(layer)
+    model = nets[0]
+    # data_iter = iter(snip_loader)
+    if not args.iter_prune:
+        data_iter = iter(data_loader)
+        print('[*] Using single-shot SNIP.')
+        # Let the neural network run one forward pass to get connect sensitivity (CS)
+        for i in range(samples_per_class):
+            try:
+                (input, target) = GraSP_fetch_data(data_iter, num_classes, samples_per_class)
+            except:
+                data_iter = iter(dataloader)
+                (input, target) = GraSP_fetch_data(data_iter, num_classes, samples_per_class)
+            # (input, target) = data_iter.next()
+            target = target.cuda()
+            input_var = input.cuda()
+            target_var = target
+            if args.half:
+                input_var = input_var.half()
+            # compute output
+            output = model(input_var)
+            loss = criterion(output, target_var)
+            loss.backward()
+        (ortho_importance*get_svip_loss(model)).backward()
+
+        # prune the network using CS
+        for net in nets:
+            # net_prune_snip(net, args.sparse_lvl)
+            net_prune_snip(net, args.sparse_lvl)
+
+        # print('[*] SNIP pruning done!')
+        print('[*] SNIP weight pruning done!')
+
+    else:
+        print('[*] Using iterative SNIP.')
+        num_iter = 10
+        data_iter = iter(data_loader)
+        for i in range(num_iter):
+            try:
+                (input, target) = GraSP_fetch_data(data_iter, num_classes, samples_per_class)
+            except:
+                data_iter = iter(dataloader)
+                (input, target) = GraSP_fetch_data(data_iter, num_classes, samples_per_class)
+            # (input, target) = data_iter.next()
+            target = target.cuda()
+            input_var = input.cuda()
+            target_var = target
+            if args.half:
+                input_var = input_var.half()
+            # compute output
+            output = model(input_var)
+            loss = criterion(output, target_var)
+            if args.ep_coe!=0:
+                loss += args.ep_coe * get_ep(model)
+            loss.backward()
+            (ortho_importance*get_svip_loss(model)).backward()
+            # prune the network using CS
+            for net in nets:
+                net_iterative_prune(net, args.sparse_lvl**((i+1)/num_iter))
+        print('[*] Iterative SNIP pruning done!')
 
 def update_criterion(net):
     with torch.no_grad():
         for layer in net.modules():
             if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
-                layer.criterion += torch.abs(layer.weight_mask.grad)
+                # layer.criterion += torch.abs(layer.weight_mask.grad * layer.weight_mask)
+                layer.criterion += layer.weight_mask.grad * layer.weight_mask
 
 # Apply SNIP pruning methods
 def apply_advsnip(args, nets, data_loader, criterion, num_classes, samples_per_class = 10):
@@ -126,7 +313,7 @@ def apply_advsnip(args, nets, data_loader, criterion, num_classes, samples_per_c
         data_iter = iter(data_loader)
         for _ in range(10): # number of iterations for taking expectation
             utils.kaiming_initialize(model)
-            for i in range(1):
+            for _ in range(1):
                 (input, target) = GraSP_fetch_data(data_iter, num_classes, samples_per_class)
                 # (input, target) = data_iter.next()
                 target = target.cuda()
@@ -162,7 +349,115 @@ def net_prune_snip(net, sparse_lvl):
     grad_mask = {}
     for layer in net.modules():
         if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
+        # if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.ConvTranspose2d):
             grad_mask[layer]=torch.abs(layer.weight_mask.grad)
+
+    # find top sparse_lvl number of elements
+    grad_mask_flattened = torch.cat([torch.flatten(a) for a in grad_mask.values()])
+    grad_mask_sum = torch.sum(grad_mask_flattened)
+    grad_mask_flattened /= grad_mask_sum
+
+    left_params_num = int (len(grad_mask_flattened) * sparse_lvl)
+    grad_mask_topk, _ = torch.topk(grad_mask_flattened, left_params_num)
+    threshold = grad_mask_topk[-1]
+
+    modified_mask = {}
+    for layer, mask in grad_mask.items():
+        modified_mask[layer] = ((mask/grad_mask_sum)>=threshold).float()
+        a = modified_mask[layer]
+        print(((a!=0).float().sum()/a.numel()))
+    print('-'*20)
+
+    with torch.no_grad():
+        for layer in net.modules():          
+            if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
+            # if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.ConvTranspose2d):
+                # Stop calculating gradients of masks
+                layer.weight_mask.data = modified_mask[layer]
+                layer.weight_mask.requires_grad = False
+
+                # Set those pruned weight as 0 as well, Here needs to address spectral_norm layer
+                if hasattr(layer, 'weight_orig'): 
+                    layer.weight_orig *= layer.weight_mask
+                else:
+                    layer.weight *= layer.weight_mask
+
+# Prune network based on GraSP criterion
+def net_prune_grasp(net, sparse_lvl):
+    eps = 1e-10
+    grad_mask = {}
+    for layer in net.modules():
+        if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
+            grad_mask[layer]=-layer.weight_mask.grad
+
+    # find top sparse_lvl number of elements
+    grad_mask_flattened = torch.cat([torch.flatten(a) for a in grad_mask.values()])
+    grad_mask_sum = torch.sum(grad_mask_flattened) + eps
+    grad_mask_flattened /= grad_mask_sum
+
+    remove_params_num = int (len(grad_mask_flattened) * (1-sparse_lvl))
+    grad_mask_topk, _ = torch.topk(grad_mask_flattened, remove_params_num)
+    threshold = grad_mask_topk[-1]
+
+    modified_mask = {}
+    for layer, mask in grad_mask.items():
+        modified_mask[layer] = ((mask/grad_mask_sum)<=threshold).float()
+        a = modified_mask[layer]
+        print(((a!=0).float().sum()/a.numel()))
+    print('-'*20)
+
+    with torch.no_grad():
+        for layer in net.modules():          
+            if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
+                layer.weight_mask.data = modified_mask[layer]
+                # layer.weight_mask.requires_grad = False
+
+                # Set those pruned weight as 0 as well, Here needs to address spectral_norm layer
+                # layer.weight *= layer.weight_mask
+
+def net_prune_magnitude(net, sparse_lvl, modify_weight = True):
+    grad_mask = {}
+    for layer in net.modules():
+        if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
+        # if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.ConvTranspose2d):
+            grad_mask[layer]=torch.abs(layer.weight)
+
+    # find top sparse_lvl number of elements
+    grad_mask_flattened = torch.cat([torch.flatten(a) for a in grad_mask.values()])
+    grad_mask_sum = torch.sum(grad_mask_flattened)
+    grad_mask_flattened /= grad_mask_sum
+
+    left_params_num = int (len(grad_mask_flattened) * sparse_lvl)
+    grad_mask_topk, _ = torch.topk(grad_mask_flattened, left_params_num)
+    threshold = grad_mask_topk[-1]
+
+    modified_mask = {}
+    for layer, mask in grad_mask.items():
+        modified_mask[layer] = ((mask/grad_mask_sum)>=threshold).float()
+        a = modified_mask[layer]
+        print(((a!=0).float().sum()/a.numel()))
+    print('-'*20)
+
+    with torch.no_grad():
+        for layer in net.modules():          
+            if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
+            # if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.ConvTranspose2d):
+                # Stop calculating gradients of masks
+                layer.weight_mask.data = modified_mask[layer]
+                layer.weight_mask.requires_grad = False
+                
+                if modify_weight:
+                    # Set those pruned weight as 0 as well, Here needs to address spectral_norm layer
+                    if hasattr(layer, 'weight_orig'): 
+                        layer.weight_orig *= layer.weight_mask
+                    else:
+                        layer.weight *= layer.weight_mask
+
+def net_prune_snipweight(net, sparse_lvl):
+    grad_mask = {}
+    for layer in net.modules():
+        if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
+            grad_mask[layer]=torch.abs(layer.weight.grad)
 
     # find top sparse_lvl number of elements
     grad_mask_flattened = torch.cat([torch.flatten(a) for a in grad_mask.values()])
@@ -186,6 +481,187 @@ def net_prune_snip(net, sparse_lvl):
                 # Stop calculating gradients of masks
                 layer.weight_mask.data = modified_mask[layer]
                 layer.weight_mask.requires_grad = False
+
+                # Set those pruned weight as 0 as well, Here needs to address spectral_norm layer
+                if hasattr(layer, 'weight_orig'): 
+                    layer.weight_orig *= layer.weight_mask
+                else:
+                    layer.weight *= layer.weight_mask
+
+def net_iterative_prune(net, sparse_lvl):
+    grad_mask = {}
+    for layer in net.modules():
+        if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
+            grad_mask[layer]=torch.abs(layer.weight_mask.grad * layer.weight_mask)
+
+    # find top sparse_lvl number of elements
+    grad_mask_flattened = torch.cat([torch.flatten(a) for a in grad_mask.values()])
+    grad_mask_sum = torch.sum(grad_mask_flattened)
+    grad_mask_flattened /= grad_mask_sum
+
+    left_params_num = int (len(grad_mask_flattened) * sparse_lvl)
+    grad_mask_topk, _ = torch.topk(grad_mask_flattened, left_params_num)
+    threshold = grad_mask_topk[-1]
+
+    modified_mask = {}
+    for layer, mask in grad_mask.items():
+        modified_mask[layer] = ((mask/grad_mask_sum)>=threshold).float()
+        a = modified_mask[layer]
+
+    with torch.no_grad():
+        for layer in net.modules():          
+            if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
+                # Stop calculating gradients of masks
+                layer.weight_mask.data = modified_mask[layer]
+                # layer.weight_mask.requires_grad = False
+
+                # Set those pruned weight as 0 as well, Here needs to address spectral_norm layer
+                # if hasattr(layer, 'weight_orig'): 
+                #     layer.weight_orig *= layer.weight_mask
+                # else:
+                #     layer.weight *= layer.weight_mask
+
+def prune_net_increaseloss(net, sparse_lvl, excludelinear=False):
+    if excludelinear:
+        prune_types = (nn.Conv2d, nn.ConvTranspose2d)
+    else:
+        prune_types = (nn.Conv2d, nn.Linear, nn.ConvTranspose2d)
+
+    grad_mask = {}
+    total = 0
+    # wmg_nonzero = 0
+    # wm_nonzero = 0
+    for layer in net.modules():
+        if isinstance(layer, prune_types):
+            grad_mask[layer]=(layer.weight_mask.grad)[layer.weight_mask.nonzero(as_tuple=True)]
+            total += layer.weight_mask.nelement()
+            # wmg_nonzero += (layer.weight_mask.grad!=0).sum()
+            # wm_nonzero += (layer.weight_mask!=0).sum()
+            # print('wmg:{}'.format((layer.weight_mask.grad!=0).sum()))
+            # print('wm:{}'.format((layer.weight_mask!=0).sum()))
+    # print('weight mask sparsity:{}'.format(wm_nonzero))
+    # print('grad sparsity:{}'.format(wmg_nonzero))
+    # print('Total:{}'.format(total))
+    grad_mask_sum = 1
+    # find top sparse_lvl number of elements
+    grad_mask_flattened_nonzero = torch.cat([torch.flatten(a) for a in grad_mask.values()])
+    # grad_mask_flattened_nonzero = torch.flatten(grad_mask_flattened[torch.nonzero(grad_mask_flattened)])
+    grad_mask_flattened_nonzero /= grad_mask_sum
+
+    left_params_num = int (total * sparse_lvl)
+    # print('LEFT_NUM:{}'.format(left_params_num))
+    # print('Prune_NUM:{}'.format(prune_params_num))
+    # print('non zero:{}'.format(len(grad_mask_flattened_nonzero)))
+    grad_mask_topk, _ = torch.topk(grad_mask_flattened_nonzero, left_params_num)
+    threshold = grad_mask_topk[-1]
+    # print(((grad_mask_flattened/grad_mask_sum)>=threshold).float().sum())
+
+    modified_mask = {}
+    modified_num = 0
+    for layer, mask in grad_mask.items():
+#         print(mask.size())
+#         print(layer.weight_mask.size())
+        modified_mask[layer] = (((layer.weight_mask.grad/grad_mask_sum)>=threshold)*(layer.weight_mask!=0)).float()
+        modified_num += (modified_mask[layer]!=0).sum()
+        # a = modified_mask[layer]
+    print(1.0*modified_num/total)
+    with torch.no_grad():
+        for layer in net.modules():          
+            if isinstance(layer, prune_types):
+                # Stop calculating gradients of masks
+                layer.weight_mask.data = modified_mask[layer]
+                # layer.weight_mask.requires_grad = False
+
+                # Set those pruned weight as 0 as well, Here needs to address spectral_norm layer
+                if hasattr(layer, 'weight_orig'): 
+                    layer.weight_orig *= layer.weight_mask
+                else:
+                    layer.weight *= layer.weight_mask
+
+def prune_net_decreaseloss(net, sparse_lvl, excludelinear=False):
+    if excludelinear:
+        prune_types = (nn.Conv2d, nn.ConvTranspose2d)
+    else:
+        prune_types = (nn.Conv2d, nn.Linear, nn.ConvTranspose2d)
+
+    grad_mask = {}
+    total = 0
+    # wmg_nonzero = 0
+    # wm_nonzero = 0
+    for layer in net.modules():
+        if isinstance(layer, prune_types):
+            grad_mask[layer]=(layer.weight_mask.grad)[layer.weight_mask.nonzero(as_tuple=True)]
+            total += layer.weight_mask.nelement()
+            # wmg_nonzero += (layer.weight_mask.grad!=0).sum()
+            # wm_nonzero += (layer.weight_mask!=0).sum()
+            # print('wmg:{}'.format((layer.weight_mask.grad!=0).sum()))
+            # print('wm:{}'.format((layer.weight_mask!=0).sum()))
+    # print('weight mask sparsity:{}'.format(wm_nonzero))
+    # print('grad sparsity:{}'.format(wmg_nonzero))
+    # print('Total:{}'.format(total))
+    grad_mask_sum = 1
+    # find top sparse_lvl number of elements
+    grad_mask_flattened_nonzero = torch.cat([torch.flatten(a) for a in grad_mask.values()])
+    # grad_mask_flattened_nonzero = torch.flatten(grad_mask_flattened[torch.nonzero(grad_mask_flattened)])
+    grad_mask_flattened_nonzero /= grad_mask_sum
+
+    left_params_num = int (total * sparse_lvl)
+    prune_params_num = len(grad_mask_flattened_nonzero) - left_params_num
+    # print('LEFT_NUM:{}'.format(left_params_num))
+    # print('Prune_NUM:{}'.format(prune_params_num))
+    # print('non zero:{}'.format(len(grad_mask_flattened_nonzero)))
+    grad_mask_topk, _ = torch.topk(grad_mask_flattened_nonzero, prune_params_num)
+    threshold = grad_mask_topk[-1]
+    # print(((grad_mask_flattened/grad_mask_sum)>=threshold).float().sum())
+
+    modified_mask = {}
+    modified_num = 0
+    for layer, mask in grad_mask.items():
+#         print(mask.size())
+#         print(layer.weight_mask.size())
+        modified_mask[layer] = (((layer.weight_mask.grad/grad_mask_sum)<threshold)*(layer.weight_mask!=0)).float()
+        modified_num += (modified_mask[layer]!=0).sum()
+        # a = modified_mask[layer]
+    print(1.0*modified_num/total)
+    with torch.no_grad():
+        for layer in net.modules():          
+            if isinstance(layer, prune_types):
+                # Stop calculating gradients of masks
+                layer.weight_mask.data = modified_mask[layer]
+                # layer.weight_mask.requires_grad = False
+
+                # Set those pruned weight as 0 as well, Here needs to address spectral_norm layer
+                if hasattr(layer, 'weight_orig'): 
+                    layer.weight_orig *= layer.weight_mask
+                else:
+                    layer.weight *= layer.weight_mask
+
+def net_iterative_prune_wolinear(net, sparse_lvl):
+    grad_mask = {}
+    for layer in net.modules():
+        if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.ConvTranspose2d):
+            grad_mask[layer]=torch.abs(layer.weight_mask.grad * layer.weight_mask)
+
+    # find top sparse_lvl number of elements
+    grad_mask_flattened = torch.cat([torch.flatten(a) for a in grad_mask.values()])
+    grad_mask_sum = torch.sum(grad_mask_flattened)
+    grad_mask_flattened /= grad_mask_sum
+
+    left_params_num = int (len(grad_mask_flattened) * sparse_lvl)
+    grad_mask_topk, _ = torch.topk(grad_mask_flattened, left_params_num)
+    threshold = grad_mask_topk[-1]
+
+    modified_mask = {}
+    for layer, mask in grad_mask.items():
+        modified_mask[layer] = ((mask/grad_mask_sum)>=threshold).float()
+        a = modified_mask[layer]
+
+    with torch.no_grad():
+        for layer in net.modules():          
+            if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.ConvTranspose2d):
+                # Stop calculating gradients of masks
+                layer.weight_mask.data = modified_mask[layer]
+                # layer.weight_mask.requires_grad = False
 
                 # Set those pruned weight as 0 as well, Here needs to address spectral_norm layer
                 if hasattr(layer, 'weight_orig'): 
@@ -275,7 +751,7 @@ def add_mask_current_active(layer):
                 layer.weight.data = layer.weight_mask * layer.weight
             modify_mask_forward(layer)
 
-def add_mask_rand(layer, sparse_lvl, modify_weight=True, structured=False):
+def add_mask_rand(layer, sparse_lvl, modify_weight=True, structured=False, requires_grad = False):
     # It means such layers are using spectral_norm layers
     with torch.no_grad():
         if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
@@ -300,6 +776,7 @@ def add_mask_rand(layer, sparse_lvl, modify_weight=True, structured=False):
                     layer.weight_mask = weight_mask_temp.view(layer.weight.size())
                 if modify_weight:
                     layer.weight.data = layer.weight_mask * layer.weight
+            layer.weight_mask.requires_grad = requires_grad
             modify_mask_forward(layer)
 
 
@@ -379,3 +856,11 @@ def get_snip_mask(args, nets, loader, g_loss_func, d_loss_func, device):
     for net in nets:
         net.zero_grad()
     return modified_masks
+
+def get_ep(net):
+    ep_loss = 0
+    for layer in net.modules():          
+        if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear) or isinstance(layer, nn.ConvTranspose2d):
+            flatten = layer.weight_mask.view(layer.weight_mask.size(0), -1)
+            ep_loss += torch.norm(flatten @ flatten.T - torch.eye(layer.weight_mask.size(0), device = flatten.device))
+    return ep_loss

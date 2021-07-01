@@ -15,18 +15,15 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import resnet
 import sampler
-import snip
 import utils
 import numpy as np
-import svfp
 import torchvision.models as models
-import special_init
 import torch.nn.init as init
 import time
-import ftprune
-import ntkprune
-# import snipres
+import snip
+import attack
 import zenprune
+import synflow
 
 model_names = sorted(name for name in resnet.__dict__
     if name.islower() and not name.startswith("__")
@@ -71,9 +68,13 @@ parser.add_argument('--save-every', dest='save_every',
                     type=int, default=10)
 parser.add_argument('--sv', dest='compute_sv', action='store_true',
                     help='compute_sv throughout training')
+parser.add_argument('--ntk', dest='compute_ntk', action='store_true',
+                    help='compute ntk eigenvalues throughout training')
+parser.add_argument('--lrs',dest='compute_lrs',action='store_true',
+                    help='compute number of linear regions throughout training')
 parser.add_argument('--seed', default=1, type=int, help='seed')
 # Following arguments are for pruning
-parser.add_argument('--prune_method', type=str, default='NONE', choices=['Zen','NONE', 'GRASP', 'RAND', 'SNIP', 'Delta', 'TEST', 'FTP','NTK','SNIPRES','OrthoSNIP'], help='Pruning methods.')
+parser.add_argument('--prune_method', type=str, default='NONE', choices=['NONE','RAND', 'SNIP', 'GRASP', 'Zen', 'Mag', 'Synflow'], help='Pruning methods for lottery ticket experiments.')
 parser.add_argument('--prunesets_num', type=int, default=10, help='Number of datapoints for applying pruning methods.')
 parser.add_argument('--sparse_iter', type=float, default=0, help='Sparsity level of neural networks.')
 parser.add_argument('--sparse_lvl', type=float, default=1, help='Sparsity level of neural networks.')
@@ -112,45 +113,9 @@ def main():
     
     torch.manual_seed(args.seed)
 
-    # optionally resume from a checkpoint
-    if args.resume:
-        if os.path.isfile(args.resume):
-            print("=> loading checkpoint '{}'".format(args.resume))
-            checkpoint = torch.load(args.resume)
-            args.start_epoch = checkpoint['epoch']
-            best_prec1 = checkpoint['best_prec1']
-            model.load_state_dict(checkpoint['state_dict'])
-            print("=> loaded checkpoint '{}' (epoch {})"
-                  .format(args.evaluate, checkpoint['epoch']))
-        else:
-            print("=> no checkpoint found at '{}'".format(args.resume))
-
     cudnn.benchmark = True
 
     if args.dataset =='cifar10':
-        # num_classes = 10
-        # print('Loading {} dataset.'.format(args.dataset))
-        # normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-        #                                  std=[0.229, 0.224, 0.225])
-        # train_dataset = datasets.CIFAR10(root='./data', train=True, transform=transforms.Compose([
-        #         transforms.RandomHorizontalFlip(),
-        #         transforms.RandomCrop(32, 4),
-        #         transforms.ToTensor(),
-        #         normalize,
-        #     ]), download=True)
-
-        # train_loader = torch.utils.data.DataLoader(
-        #     train_dataset,
-        #     batch_size=args.batch_size, shuffle=True,
-        #     num_workers=args.workers, pin_memory=True)
-
-        # val_loader = torch.utils.data.DataLoader(
-        #     datasets.CIFAR10(root='./data', train=False, transform=transforms.Compose([
-        #         transforms.ToTensor(),
-        #         normalize,
-        #     ])),
-        #     batch_size=128, shuffle=False,
-        #     num_workers=args.workers, pin_memory=True)
         print('Loading {} dataset.'.format(args.dataset))
         input_shape, num_classes = load.dimension(args.dataset) 
         train_dataset, train_loader = load.dataloader(args.dataset, args.batch_size, True, args.workers)
@@ -176,7 +141,8 @@ def main():
 
     if args.arch == 'resnet20':
         print('Creating {} model.'.format(args.arch))
-        model = torch.nn.DataParallel(resnet.__dict__[args.arch](ONI=args.ONI, T_iter=args.T_iter))
+        # model = torch.nn.DataParallel(resnet.__dict__[args.arch](ONI=args.ONI, T_iter=args.T_iter))
+        model = resnet.__dict__[args.arch](ONI=args.ONI, T_iter=args.T_iter)
         model.cuda()
     elif args.arch == 'resnet18':
         print('Creating {} model.'.format(args.arch))
@@ -205,7 +171,6 @@ def main():
         model = load.model(args.arch, modeltype)(input_shape, 
                                              num_classes,
                                              dense_classifier = True).cuda()
-
     
     # for layer in model.modules():
     #     if isinstance(layer, nn.Linear):
@@ -214,6 +179,7 @@ def main():
     #         special_init.DeltaOrthogonal_init(layer.weight.data)
 
     print('Number of parameters of model: {}.'.format(count_parameters(model)))
+
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
 
@@ -223,29 +189,40 @@ def main():
         utils.run_once(train_loader, model)
         utils.detach_hook([size_hook])
         training_sv = []
-        # training_sv_avg = []
-        # training_sv_std = []
         training_svmax = []
         training_sv20 = [] # 50% singular value
         training_sv50 = [] # 50% singular value
         training_sv80 = [] # 80% singular value
-        # training_kclip12 = [] # singular values larger than 1e-12
-        training_sv50p = [] # 50% non-zero singular value
-        training_sv80p = [] # 80% non-zero singular value
-        # training_kavg = [] # max condition number/average condition number
-        sv, svmax, sv20, sv50, sv80,  sv50p, sv80p = utils.get_sv(model, size_hook)
+        training_kclip = [] # singular values larger than 1e-12
+        sv, svmax, sv20, sv50, sv80, kclip = utils.get_sv(model, size_hook)
         training_sv.append(sv)
-        # training_sv_avg.append(sv_avg)
-        # training_sv_std.append(sv_std)
         training_svmax.append(svmax)
         training_sv20.append(sv20)
         training_sv50.append(sv50)
         training_sv80.append(sv80)
-        # training_kclip12.append(kclip12)
-        training_sv50p.append(sv50p)
-        training_sv80p.append(sv80p)
-        # training_kavg.append(kavg)
-            
+        training_kclip.append(kclip)
+    
+    if args.compute_ntk:
+        training_ntk_eig = []
+        if num_classes>=32:
+            _, ntk_loader = load.dataloader(args.dataset, 32, True, args.workers)
+            grasp_fetch = False
+        else:
+            ntk_loader = train_loader
+            grasp_fetch = True
+        training_ntk_eig.append(utils.get_ntk_eig(ntk_loader, [model], train_mode = True, num_batch=1, num_classes=num_classes, samples_per_class=1, grasp_fetch=grasp_fetch))
+    
+    if args.compute_lrs:
+        # training_lrs = []
+        # lrc_model = utils.Linear_Region_Collector(train_loader, input_size=(args.batch_size,*input_shape), sample_batch=300)
+        # lrc_model.reinit(models=[model])
+        # lrs = lrc_model.forward_batch_sample()[0]
+        # training_lrs.append(lrs)
+        # lrc_model.clear_hooks()
+        # print('[*] Current number of linear regions:{}'.format(lrs))
+        GAP_zen, output_zen = utils.get_zenscore(model, train_loader, args.arch, num_classes)
+        print('[*] Before pruning: GAP_zen:{:e}, output_zen:{:e}'.format(GAP_zen,output_zen))
+    
     if args.half:
         model.half()
         criterion.half()
@@ -254,6 +231,7 @@ def main():
                                 momentum=args.momentum,
                                 nesterov = True,
                                 weight_decay=args.weight_decay)
+
     if args.dataset ==  'tiny-imagenet':
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
                                                         milestones=[100, 150], last_epoch=args.start_epoch - 1)
@@ -265,16 +243,25 @@ def main():
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
                                                         milestones=[80, 120], last_epoch=args.start_epoch - 1)
 
-    # if args.arch in ['resnet1202', 'resnet110']:
-    #     # for resnet1202 original paper uses lr=0.01 for first 400 minibatches for warm-up
-    #     # then switch back. In this setup it will correspond for first epoch.
-    #     for param_group in optimizer.param_groups:
-    #         param_group['lr'] = args.lr*0.1
-    for epoch in range(args.pre_epochs):
+    # This part is for training full NN model to obtain Lottery ticket
+
+    # # First save original network:
+    init_path = os.path.join(args.save_dir, 'init_checkpoint.th')
+    save_checkpoint({
+                'state_dict': model.state_dict()
+            }, False, filename=init_path)
+
+    if args.prune_method == 'NONE':
+        pre_epochs = args.epochs
+    else:
+        pre_epochs = 0
+
+    training_loss = []
+    for epoch in range(pre_epochs):
 
         # train for one epoch
         print('current lr {:.5e}'.format(optimizer.param_groups[0]['lr']))
-        train(train_loader, model, criterion, optimizer, epoch)
+        train(train_loader, model, criterion, optimizer, epoch, track = training_loss)
         lr_scheduler.step()
 
         # evaluate on validation set
@@ -289,174 +276,96 @@ def main():
                 'epoch': epoch + 1,
                 'state_dict': model.state_dict(),
                 'best_prec1': best_prec1,
-            }, is_best, filename=os.path.join(args.save_dir, 'checkpoint.th'))
-
-        # save_checkpoint({
-        #     'state_dict': model.state_dict(),
-        #     'best_prec1': best_prec1,
-        # }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
+            }, is_best, filename=os.path.join(args.save_dir, 'densenet_checkpoint.th'))
 
         if args.compute_sv and epoch % args.save_every == 0:
-            sv,  svmax, sv20, sv50, sv80, sv50p, sv80p= utils.get_sv(model, size_hook)
+            sv,  svmax, sv20, sv50, sv80, kclip= utils.get_sv(model, size_hook)
             training_sv.append(sv)
-            # training_sv_avg.append(sv_avg)
-            # training_sv_std.append(sv_std)
             training_svmax.append(svmax)
             training_sv20.append(sv20)
             training_sv50.append(sv50)
             training_sv80.append(sv80)
-            # training_kclip12.append(kclip12)
-            training_sv50p.append(sv50p)
-            training_sv80p.append(sv80p)
-            # training_kavg.append(kavg)
+            training_kclip.append(kclip)
             np.save(os.path.join(args.save_dir, 'sv.npy'), training_sv)
-            # np.save(os.path.join(args.save_dir, 'sv_avg.npy'), training_sv_avg)
-            # np.save(os.path.join(args.save_dir, 'sv_std.npy'), training_sv_std)
             np.save(os.path.join(args.save_dir, 'sv_svmax.npy'), training_svmax)
             np.save(os.path.join(args.save_dir, 'sv_sv20.npy'), training_sv20)
             np.save(os.path.join(args.save_dir, 'sv_sv50.npy'), training_sv50)
             np.save(os.path.join(args.save_dir, 'sv_sv80.npy'), training_sv80)
-            # np.save(os.path.join(args.save_dir, 'sv_kclip12.npy'), training_kclip12)
-            np.save(os.path.join(args.save_dir, 'sv_sv50p.npy'), training_sv50p)
-            np.save(os.path.join(args.save_dir, 'sv_sv80p.npy'), training_sv80p)
-            # np.save(os.path.join(args.save_dir, 'sv_kavg.npy'), training_kavg)
+            np.save(os.path.join(args.save_dir, 'sv_kclip.npy'), training_kclip)
 
-    print('[*] {} pre-training epochs done'.format(args.pre_epochs))
+        if args.compute_ntk and epoch % args.save_every == 0:
+            training_ntk_eig.append(utils.get_ntk_eig(ntk_loader, [model], train_mode = True, num_batch=1, num_classes=num_classes, samples_per_class=1, grasp_fetch=grasp_fetch))
+            np.save(os.path.join(args.save_dir, 'ntk_eig.npy'), training_ntk_eig)
+        
 
-    # checkpoint = torch.load('preprune.th')
-    # model.load_state_dict(checkpoint['state_dict'])
+
+    print('[*] {} epochs of dense network pre-training done'.format(pre_epochs))
+    np.save(os.path.join(args.save_dir, 'trainloss.npy'), training_loss)
+
+    # densenet_checkpoint = torch.load(os.path.join(args.save_dir, 'densenet_checkpoint.th'))
+    # model.load_state_dict(densenet_checkpoint['state_dict'])
+    # print('Model loaded!')
+    # Obtain lottery ticket by magnitude pruning
+    if args.prune_method == 'NONE':
+        snip.apply_mag_prune(args, model)
+        # reinitialize
+        init_checkpoint = torch.load(init_path)
+        model.load_state_dict(init_checkpoint['state_dict'])
+        print('Model reinitialized!')
+    elif args.prune_method == 'SNIP':
+        init_checkpoint = torch.load(init_path)
+        model.load_state_dict(init_checkpoint['state_dict'])
+        print('Model reinitialized!')
+        snip.apply_snip(args, [model], train_loader, criterion, num_classes=num_classes)
+        # attack.shuffle_mask(model)
+    elif args.prune_method == 'RAND':
+        init_checkpoint = torch.load(init_path)
+        model.load_state_dict(init_checkpoint['state_dict'])
+        print('Model reinitialized!')
+        snip.apply_rand_prune([model], args.sparse_lvl)
+    elif args.prune_method == 'GRASP':
+        init_checkpoint = torch.load(init_path)
+        model.load_state_dict(init_checkpoint['state_dict'])
+        print('Model reinitialized!')
+        snip.apply_grasp(args, [model], train_loader, criterion, num_classes=num_classes)
+    elif args.prune_method == 'Zen':
+        zenprune.apply_zenprune(args, [model], train_loader)
+        # zenprune.apply_cont_zenprune(args, [model], train_loader)
+        # zenprune.apply_zentransfer(args, [model], train_loader)
+        # init_checkpoint = torch.load(init_path)
+        # model.load_state_dict(init_checkpoint['state_dict'])
+        # print('Model reinitialized!')
+    elif args.prune_method == 'Mag':
+        snip.apply_mag_prune(args, model)
+        init_checkpoint = torch.load(init_path)
+        model.load_state_dict(init_checkpoint['state_dict'])
+        print('Model reinitialized!')
+    elif args.prune_method == 'Synflow':
+        synflow.apply_synflow(args, model)
+
+    print('{} done, sparsity of the current model: {}.'.format(args.prune_method, utils.check_sparsity(model)))
     
-    if args.prune_method != 'NONE':
-        nets = [model]
-        # snip_loader = torch.utils.data.DataLoader(
-        # train_dataset,
-        # batch_size=num_classes, shuffle=False,
-        # num_workers=args.workers, pin_memory=True, sampler=sampler.BalancedBatchSampler(train_dataset))
-
-        if args.prune_method == 'SNIP':
-            # for layer in model.modules():
-            #     snip.add_mask_ones(layer)
-            # # svfp.svip_reinit(model)
-            # # if args.compute_sv:
-            # #     sv, sv_avg, sv_std = utils.get_sv(model, size_hook)
-            # #     training_sv.append(sv)
-            # #     training_sv_avg.append(sv_avg)
-            # #     training_sv_std.append(sv_std)
-            # utils.save_sparsity(model, args.save_dir)
-            # save_checkpoint({
-            #     'state_dict': model.state_dict(),
-            #     'best_prec1': 0,
-            # }, 0, filename=os.path.join(args.save_dir, 'preprune.th'))
-            if args.adv:
-                snip.apply_advsnip(args, nets, train_loader, criterion, num_classes=num_classes)
-            else:
-                snip.apply_snip(args, nets, train_loader, criterion, num_classes=num_classes)
-            # snip.apply_snip(args, nets, snip_loader, criterion)
-        elif args.prune_method == 'SNIPRES':
-            snipres.apply_snipres(args, nets, train_loader, criterion, input_shape, num_classes=num_classes)
-        elif args.prune_method == 'TEST':
-            # checkpoint = torch.load('preprune.th')
-            # model.load_state_dict(checkpoint['state_dict'])
-            # svip.apply_svip(args, nets)
-            # svfp.apply_svip(args, nets)
-            # given_sparsity = np.load('saved_sparsity.npy')
-            # svfp.apply_svip_givensparsity(args, nets, given_sparsity)
-            num_apply_layer = utils.get_apply_layer(model)
-            given_sparsity = np.ones(num_apply_layer,)
-            # given_sparsity[-4] = args.s_value
-            # given_sparsity[-5] = args.s_value
-            for layer in args.layer:
-                given_sparsity[layer] = args.s_value
-            print(given_sparsity)
-            # given_sparsity = np.load(args.s_name+'.npy')
-            # snip.apply_rand_prune_givensparsity(nets, given_sparsity)
-            ftprune.apply_specprune(nets, given_sparsity)
-        elif args.prune_method == 'RAND':
-            # utils.save_sparsity(model, args.save_dir)
-            # checkpoint = torch.load('preprune.th')
-            # model.load_state_dict(checkpoint['state_dict'])
-            # snip.apply_rand_prune(nets, args.sparse_lvl)
-            # given_sparsity = np.load(args.save_dir+'/saved_sparsity.npy')
-            num_apply_layer = utils.get_apply_layer(model)
-            given_sparsity = np.ones(num_apply_layer,)
-            # given_sparsity[-4] = args.s_value
-            # given_sparsity[-5] = args.s_value
-            for layer in args.layer:
-                given_sparsity[layer] = args.s_value
-            print(given_sparsity)
-            # given_sparsity = np.load(args.s_name+'.npy')
-            snip.apply_rand_prune_givensparsity(nets, given_sparsity)
-            # svfp.apply_rand_prune_givensparsity_var(nets, given_sparsity, args.reduce_ratio, args.structured, args)
-            # svfp.svip_reinit_givenlayer(nets, args.layer)
-        elif args.prune_method == 'Zen':
-            zenprune.apply_zenprune(args, nets, train_loader)
-            # zenprune.apply_nsprune(args, nets, train_loader, num_classes=num_classes)
-            # zenprune.apply_SAP(args, nets, train_loader, criterion, num_classes=num_classes)
-        elif args.prune_method == 'OrthoSNIP':
-            snip.apply_orthosnip(args, nets, train_loader, criterion, num_classes=num_classes)
-        elif args.prune_method == 'Delta':
-            snip.apply_prune_active(nets)
-        elif args.prune_method == 'FTP':
-            ftprune.apply_fpt(args, nets, train_loader, num_classes=num_classes)
-        elif args.prune_method == 'NTK':
-            _, ntk_loader = load.dataloader(args.dataset, 10, True, args.workers)
-            if args.adv:
-                ntkprune.ntk_prune_adv(args, nets, ntk_loader, num_classes=num_classes)
-            else:
-                # ntkprune.ntk_prune(args, nets, ntk_loader, num_classes=num_classes)
-                ntkprune.ntk_ep_prune(args, nets, ntk_loader, num_classes=num_classes)
-
-        # utils.save_sparsity(model, args.save_dir)
-        if args.compute_sv:
-            if args.rescale:
-                ###################################
-                _, svmax, _, _, _, _, _ = utils.get_sv(model, size_hook)
-                applied_layer = 0
-                for net in nets:
-                    for layer in net.modules():
-                        if isinstance(layer, (nn.Linear, nn.Conv2d, nn.ConvTranspose2d)):
-                            if given_sparsity[applied_layer] != 1:
-                                # add_mask_rand_basedonchannel(layer, sparsity[applied_layer], ratio, True, structured)
-                                with torch.no_grad():
-                                    layer.weight /= svmax[applied_layer]
-                            applied_layer += 1
-                ###################################
-
-            sv, svmax, sv20, sv50, sv80, sv50p, sv80p = utils.get_sv(model, size_hook)
-            training_sv.append(sv)
-            # training_sv_avg.append(sv_avg)
-            # training_sv_std.append(sv_std)
-            training_svmax.append(svmax)
-            training_sv20.append(sv20)
-            training_sv50.append(sv50)
-            training_sv80.append(sv80)
-            # training_kclip12.append(kclip12)
-            training_sv50p.append(sv50p)
-            training_sv80p.append(sv80p)
-            # training_kavg.append(kavg)
-            np.save(os.path.join(args.save_dir, 'sv.npy'), training_sv)
-            # np.save(os.path.join(args.save_dir, 'sv_avg.npy'), training_sv_avg)
-            # np.save(os.path.join(args.save_dir, 'sv_std.npy'), training_sv_std)
-            np.save(os.path.join(args.save_dir, 'sv_svmax.npy'), training_svmax)
-            np.save(os.path.join(args.save_dir, 'sv_sv20.npy'), training_sv20)
-            np.save(os.path.join(args.save_dir, 'sv_sv50.npy'), training_sv50)
-            np.save(os.path.join(args.save_dir, 'sv_sv80.npy'), training_sv80)
-            # np.save(os.path.join(args.save_dir, 'sv_kclip12.npy'), training_kclip12)
-            np.save(os.path.join(args.save_dir, 'sv_sv50p.npy'), training_sv50p)
-            np.save(os.path.join(args.save_dir, 'sv_sv80p.npy'), training_sv80p)
-            # np.save(os.path.join(args.save_dir, 'sv_kavg.npy'), training_kavg)
-
-        print('[*] Sparsity after pruning: ', utils.check_sparsity(model))
+    if args.compute_lrs:
+        # training_lrs = []
+        # lrc_model = utils.Linear_Region_Collector(train_loader, input_size=(args.batch_size,*input_shape), sample_batch=300)
+        # lrc_model.reinit(models=[model])
+        # lrs = lrc_model.forward_batch_sample()[0]
+        # training_lrs.append(lrs)
+        # lrc_model.clear_hooks()
+        # print('[*] Current number of linear regions:{}'.format(lrs))
+        GAP_zen, output_zen = utils.get_zenscore(model, train_loader, args.arch, num_classes)
+        print('[*] After pruning: GAP_zen:{:e}, output_zen:{:e}'.format(GAP_zen,output_zen))
 
     if args.evaluate:
         validate(val_loader, model, criterion)
         return
 
-    # reinitialize
+    # Recreate optimizer and learning scheduler
     optimizer = torch.optim.SGD(model.parameters(), args.lr,
                                 momentum=args.momentum,
                                 nesterov = True,
                                 weight_decay=args.weight_decay)
+
     if args.dataset ==  'tiny-imagenet':
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
                                                         milestones=[100, 150], last_epoch=args.start_epoch - 1)
@@ -467,12 +376,13 @@ def main():
     else:
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
                                                         milestones=[80, 120], last_epoch=args.start_epoch - 1)
-    for epoch in range(args.start_epoch, args.epochs):
+
+    for epoch in range(args.epochs):
     # for epoch in range(args.pre_epochs, args.epochs):
 
         # train for one epoch
         print('current lr {:.5e}'.format(optimizer.param_groups[0]['lr']))
-        train(train_loader, model, criterion, optimizer, epoch, ortho=args.ortho)
+        train(train_loader, model, criterion, optimizer, epoch, track=training_loss, ortho=args.ortho)
         lr_scheduler.step()
 
         # evaluate on validation set
@@ -487,7 +397,7 @@ def main():
                 'epoch': epoch + 1,
                 'state_dict': model.state_dict(),
                 'best_prec1': best_prec1,
-            }, is_best, filename=os.path.join(args.save_dir, 'checkpoint.th'))
+            }, is_best, filename=os.path.join(args.save_dir, 'sparsenet_checkpoint.th'))
             # if args.prune_method !='NONE':
             #     print(utils.check_layer_sparsity(model))   
 
@@ -497,32 +407,33 @@ def main():
         # }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
 
         if args.compute_sv and epoch % args.save_every == 0:
-            sv,  svmax, sv20, sv50, sv80,  sv50p, sv80p = utils.get_sv(model, size_hook)
+            sv,  svmax, sv20, sv50, sv80,  kclip = utils.get_sv(model, size_hook)
             training_sv.append(sv)
-            # training_sv_avg.append(sv_avg)
-            # training_sv_std.append(sv_std)
             training_svmax.append(svmax)
             training_sv20.append(sv20)
             training_sv50.append(sv50)
             training_sv80.append(sv80)
-            # training_kclip12.append(kclip12)
-            training_sv50p.append(sv50p)
-            training_sv80p.append(sv80p)
-            # training_kavg.append(kavg)
+            training_kclip.append(kclip)
             np.save(os.path.join(args.save_dir, 'sv.npy'), training_sv)
-            # np.save(os.path.join(args.save_dir, 'sv_avg.npy'), training_sv_avg)
-            # np.save(os.path.join(args.save_dir, 'sv_std.npy'), training_sv_std)
             np.save(os.path.join(args.save_dir, 'sv_svmax.npy'), training_svmax)
             np.save(os.path.join(args.save_dir, 'sv_sv20.npy'), training_sv20)
             np.save(os.path.join(args.save_dir, 'sv_sv50.npy'), training_sv50)
             np.save(os.path.join(args.save_dir, 'sv_sv80.npy'), training_sv80)
-            # np.save(os.path.join(args.save_dir, 'sv_kclip12.npy'), training_kclip12)
-            np.save(os.path.join(args.save_dir, 'sv_sv50p.npy'), training_sv50p)
-            np.save(os.path.join(args.save_dir, 'sv_sv80p.npy'), training_sv80p)
-            # np.save(os.path.join(args.save_dir, 'sv_kavg.npy'), training_kavg)
+            np.save(os.path.join(args.save_dir, 'sv_kclip.npy'), training_kclip)
 
+        if args.compute_ntk and epoch % args.save_every == 0:
+            training_ntk_eig.append(utils.get_ntk_eig(ntk_loader, [model], train_mode = True, num_batch=1, num_classes=num_classes, samples_per_class=1, grasp_fetch=grasp_fetch))
+            np.save(os.path.join(args.save_dir, 'ntk_eig.npy'), training_ntk_eig)
 
-def train(train_loader, model, criterion, optimizer, epoch, ortho=False):
+        # if args.compute_lrs and epoch % args.save_every == 0:
+        #     lrc_model.reinit(models=[model])
+        #     lrs = lrc_model.forward_batch_sample()[0]
+        #     training_lrs.append(lrs)
+        #     lrc_model.clear_hooks()
+        #     print('[*] Current number of linear regions:{}'.format(lrs))
+    np.save(os.path.join(args.save_dir, 'trainloss.npy'), training_loss)
+
+def train(train_loader, model, criterion, optimizer, epoch, track=None, ortho=False):
     """
         Run one train epoch
     """
@@ -581,6 +492,9 @@ def train(train_loader, model, criterion, optimizer, epoch, ortho=False):
                       epoch, i, len(train_loader), batch_time=batch_time,
                       data_time=data_time, loss=losses, top1=top1))
     print('training accuracy: {:.3f}'.format(top1.avg))
+    
+    if track is not None:
+        track.append(losses.avg)
 
 
 def validate(val_loader, model, criterion):

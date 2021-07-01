@@ -79,7 +79,7 @@ def get_svip_loss(net):
         if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.ConvTranspose2d):
             loss += deconv_orth_dist(layer, layer.stride[0])
         elif isinstance(layer, nn.Linear):
-            loss += torch.norm(torch.svd(layer.weight*layer.weight_mask)[1]-torch.ones(min(layer.weight.shape)).cuda())
+            loss += torch.norm((layer.weight*layer.weight_mask) @ (layer.weight*layer.weight_mask).T - torch.eye(layer.weight.size(0)).cuda())
     return loss
 
 def compute_layer_cond(W):

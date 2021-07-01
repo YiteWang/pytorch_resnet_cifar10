@@ -50,7 +50,7 @@ class VGG(nn.Module):
         if dense_classifier:
             self.fc = nn.Linear(512, num_classes)
 
-        self._initialize_weights()
+        self.reinit()
 
     def forward(self, x):
         x = self.layers(x)
@@ -59,15 +59,19 @@ class VGG(nn.Module):
         x = self.fc(x)
         return x
 
-    def _initialize_weights(self):
+    def GAP(self, x):
+        x = self.layers(x)
+        return x
+
+    def reinit(self):
         for m in self.modules():
             if isinstance(m, (nn.Linear, nn.Conv2d)):
                 nn.init.kaiming_normal_(m.weight)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.BatchNorm2d):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
+            #     if m.bias is not None:
+            #         nn.init.constant_(m.bias, 0)
+            # elif isinstance(m, nn.BatchNorm2d):
+            #     nn.init.constant_(m.weight, 1)
+            #     nn.init.constant_(m.bias, 0)
 
 def _plan(num):
     if num == 11:
